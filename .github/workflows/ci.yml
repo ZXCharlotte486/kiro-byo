@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+env:
+  PYTHONIOENCODING: utf-8
+
 jobs:
   core:
     runs-on: ubuntu-latest

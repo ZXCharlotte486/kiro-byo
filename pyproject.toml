@@ -9,7 +9,7 @@ description = "Provider-neutral ACP Harness for KiroCrew"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{name = "Kiro BYO contributors"}]
-dependencies = []
+dependencies = ["aiohttp>=3.9,<4"]
 
 [project.optional-dependencies]
 dev = [
