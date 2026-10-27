@@ -1,5 +1,32 @@
 # Kiro BYO
 
+## 关于本仓库
+
+这是 **Kiro BYO 的源码仓库**，当前版本 **0.2.5**。Kiro BYO 是 KiroCrew 的第三方模型后端（App），**非 KiroCrew 官方项目**，也不随 KiroCrew 官方分发。
+
+- **想安装使用**：请获取打包好的 release 压缩包（含安装包 `.whl` 与校验码），不要直接拿本仓库源码安装。本仓库只放源码。
+- **兼容性**：0.2.5 对应 KiroCrew **0.11.0-rc.1**。版本不符时集成器会拒绝写入，以保护现有数据。
+- **中文文档**：[WINDOWS_QUICKSTART.md](WINDOWS_QUICKSTART.md)（安装与升级）、[安装说明.txt](安装说明.txt)（本次热修复步骤）、[修复技术报告.md](修复技术报告.md)（修复原理）、[CHANGELOG.md](CHANGELOG.md)（版本历史）。
+- **英文文档**：下方 README 正文、[QUICKSTART.md](QUICKSTART.md)、[RELEASE_NOTES_0.2.5.md](RELEASE_NOTES_0.2.5.md)。
+
+### 仓库结构
+
+| 目录 | 内容 |
+|---|---|
+| `src/kiro_byo/` | 主程序源码 |
+| `backend/`、`ui/` | KiroCrew App 外壳（后端路由与界面） |
+| `config/` | 配置样例（`*.example.json`）；真实配置与模型密钥不入库 |
+| `integration/` | 对各版 KiroCrew 的集成适配 |
+| `scripts/`、`tests/` | 构建/校验脚本与测试 |
+| 各类 `*.md` 报告 | 开发过程的审计与阶段报告 |
+
+安装包、release 副本、SHA256 校验码属于打包产物，**不放在本仓库**。
+
+This repository is the **source code of Kiro BYO**, an unofficial third-party model backend for KiroCrew. It is not affiliated with the KiroCrew project. For installation use the packaged release, not this raw source tree. See [WINDOWS_QUICKSTART.md](WINDOWS_QUICKSTART.md) for the Chinese guide.
+
+---
+
+
 **Provider-neutral ACP Harness for KiroCrew**
 
 Kiro BYO is a provider-neutral ACP Harness for KiroCrew. It runs as an alternative
