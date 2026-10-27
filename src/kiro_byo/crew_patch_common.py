@@ -957,6 +957,8 @@ def _patch_agents_resolved_model(text: str) -> str:
             for node in tree.body
             if isinstance(node, ast.AsyncFunctionDef) and node.name == "_kiro_byo_resolved_model"
         )
+        if helper.end_lineno is None:
+            raise PatchError("Crew resolved-model helper has no line span")
         text = _insert_after_line(
             text, helper.end_lineno, "\n\n" + _KIRO_BYO_RESOLVED_MODEL_REBIND
         )
