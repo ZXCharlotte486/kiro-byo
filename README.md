@@ -6,6 +6,8 @@
 
 - **想安装使用**：请获取打包好的 release 压缩包（含安装包 `.whl` 与校验码），不要直接拿本仓库源码安装。本仓库只放源码。
 - **兼容性**：0.2.5 对应 KiroCrew **0.11.0-rc.1**。版本不符时集成器会拒绝写入，以保护现有数据。
+- **新手教程**：[中文教程.md](中文教程.md)（从安装到聊天，全流程）。
+
 - **中文文档**：[WINDOWS_QUICKSTART.md](WINDOWS_QUICKSTART.md)（安装与升级）、[安装说明.txt](安装说明.txt)（本次热修复步骤）、[修复技术报告.md](修复技术报告.md)（修复原理）、[CHANGELOG.md](CHANGELOG.md)（版本历史）。
 - **英文文档**：下方 README 正文、[QUICKSTART.md](QUICKSTART.md)、[RELEASE_NOTES_0.2.5.md](RELEASE_NOTES_0.2.5.md)。
 
