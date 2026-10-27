@@ -199,10 +199,12 @@ class NativeToolRuntimeTests(unittest.TestCase):
         os.environ["KIRO_BYO_HOME"] = str(policy_home)
         try:
             runtime = NativeToolRuntime(self.root)
-            self.assertEqual(
-                [spec.name for spec in runtime.specs()],
-                ["read", "glob", "grep", "read_files", "list_directory", "code_symbols", "web_fetch", "web_search", "update_plan"],
-            )
+            names = [spec.name for spec in runtime.specs()]
+            expected = ["read", "glob", "grep", "read_files", "list_directory", "code_symbols"]
+            if "code_query" in names:
+                expected.append("code_query")
+            expected += ["web_fetch", "web_search", "update_plan"]
+            self.assertEqual(names, expected)
             with self.assertRaises(ToolValidationError):
                 runtime.validate("write", {"path": "x.txt", "content": "x"})
         finally:

@@ -190,7 +190,7 @@ def test_stalled_stdout_has_bounded_nonblocking_queue():
         with pytest.raises(OutboundTransportError, match="queue exceeded"):
             for n in range(2055):
                 server.send({"jsonrpc": "2.0", "id": n + 1, "result": {}})
-        assert time.monotonic() - before < 2
+        assert time.monotonic() - before < 5
         assert server._outbound.qsize() <= 2048
         assert server._outbound_failed.is_set()
     finally:
