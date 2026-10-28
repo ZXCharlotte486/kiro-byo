@@ -228,7 +228,11 @@ def _identifier_collection_member(text: str, variable: str, identifier: str) -> 
             target_name = node.target.id
         if target_name != variable:
             continue
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
         value = node.value
+        if value is None:
+            return False
         if isinstance(value, ast.Call) and value.args:
             value = value.args[0]
         if isinstance(value, (ast.Set, ast.List, ast.Tuple)):
@@ -803,18 +807,18 @@ def _patch_chat_handlers(text: str) -> str:
         fn = _function_node(text, "api_chat_slot_reasoning_effort")
         assignments = _semantic_assignments(fn)
         session_line = 0
-        for node in assignments:
-            if _assigned_local_name(node) == "session_key" and _call_terminal_name(_assigned_value(node)) == "effective_session_key":
-                session_line = node.lineno
+        for assign_node in assignments:
+            if _assigned_local_name(assign_node) == "session_key" and _call_terminal_name(_assigned_value(assign_node)) == "effective_session_key":
+                session_line = assign_node.lineno
                 break
 
         live_anchor: tuple[ast.Assign | ast.AnnAssign, str] | None = None
-        for node in assignments:
-            local = _assigned_local_name(node)
-            if not local or node.lineno < session_line:
+        for assign_node in assignments:
+            local = _assigned_local_name(assign_node)
+            if not local or assign_node.lineno < session_line:
                 continue
-            if _call_terminal_name(_assigned_value(node)) == "get_provider":
-                live_anchor = (node, local)
+            if _call_terminal_name(_assigned_value(assign_node)) == "get_provider":
+                live_anchor = (assign_node, local)
                 break
 
         if live_anchor is not None:

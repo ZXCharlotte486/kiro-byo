@@ -57,7 +57,7 @@ class _PinnedHTTPConnection(http.client.HTTPConnection):
         self.sock = _connect_socket(
             self._endpoint,
             timeout=self.timeout,
-            source_address=self.source_address,
+            source_address=self.source_address,  # type: ignore[attr-defined]
         )
 
 
@@ -83,12 +83,12 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
         raw = _connect_socket(
             self._endpoint,
             timeout=self.timeout,
-            source_address=self.source_address,
+            source_address=self.source_address,  # type: ignore[attr-defined]
         )
         try:
             # The TCP peer is the pinned IP, but SNI and certificate hostname
             # validation intentionally remain bound to the original hostname.
-            self.sock = self._context.wrap_socket(raw, server_hostname=self.host)
+            self.sock = self._context.wrap_socket(raw, server_hostname=self.host)  # type: ignore[attr-defined]
         except Exception:
             raw.close()
             raise
@@ -97,7 +97,7 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
 def _connect_socket(
     endpoint: _ResolvedEndpoint,
     *,
-    timeout: float,
+    timeout: float | None,
     source_address: tuple[str, int] | None = None,
 ) -> socket.socket:
     """Connect directly to ``endpoint.sockaddr`` without resolving the hostname.
@@ -405,15 +405,15 @@ class SafeWebClient:
         # not fail just because the IPv6 answer happened to sort first.
         candidates.sort(key=lambda item: 0 if item[0] == socket.AF_INET else 1)
 
-        family, socktype, proto, sockaddr = candidates[0]
+        best_family, best_socktype, best_proto, best_sockaddr = candidates[0]
         return _ResolvedEndpoint(
             parsed=parsed,
             host=host,
             port=port,
-            family=family,
-            socktype=socktype,
-            proto=proto,
-            sockaddr=sockaddr,
+            family=int(best_family),
+            socktype=int(best_socktype),
+            proto=int(best_proto),
+            sockaddr=best_sockaddr,
         )
 
     def _assert_public_url(self, url: str) -> urllib.parse.SplitResult:

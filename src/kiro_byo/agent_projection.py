@@ -69,10 +69,11 @@ class AgentProjection:
         return not self.active
 
     def allowed_native_names(self, available: set[str]) -> set[str]:
+        allowed: set[str]
         if self.unrestricted:
             allowed = set(available)
         else:
-            allowed: set[str] = set()
+            allowed = set()
             for token in self.tools:
                 token = str(token).strip()
                 if token in {"*", "@builtin"}:
