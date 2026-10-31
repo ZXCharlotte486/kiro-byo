@@ -81,7 +81,7 @@ class ModeRegistry:
         return sorted(
             eligible,
             key=lambda plugin: (
-                plugin.pack.source != "builtin", plugin.pack.display_name.lower(), plugin.id,
+                plugin.pack.source != "builtin", plugin.id != "tiga", plugin.pack.display_name.lower(), plugin.id,
             ),
         )[0]
 

@@ -41,6 +41,7 @@ from .mcp_transports import (
     MCP_LATEST_HANDSHAKE_VERSION,
     MCP_MODERN_VERSION,
     McpError,
+    McpInputRequired,
     McpJsonRpcError,
     McpProtocolError,
     McpTransportError,
@@ -155,6 +156,20 @@ def _crew_build_fingerprint() -> str:
         pass
     raw = f"{version}|{origin}|{mtime}".encode("utf-8", errors="replace")
     return hashlib.sha256(raw).hexdigest()[:24]
+
+
+@dataclass(frozen=True)
+class McpCallOutcome:
+    """Protocol-level outcome separate from model-readable tool text.
+
+    ``dispatched`` records that the remote invocation was attempted. A failed
+    dispatched call may have committed side effects, even if a server reports
+    ``isError``. Text is never used as the source of failure status.
+    """
+
+    text: str
+    is_error: bool = False
+    dispatched: bool = False
 
 
 class McpManager:
@@ -690,6 +705,24 @@ class McpManager:
                 and (allowed is None or allowed(item))
             ))
 
+    def crew_artifact_tool_names(
+        self, *, allowed: Callable[[ToolBinding], bool] | None = None
+    ) -> tuple[str, ...]:
+        """Load only verified, host-owned non-destructive artifact tools.
+
+        Delete/revert are deliberately *not* preloaded: they remain available
+        only through explicit deferred search and the usual permission checks.
+        """
+        safe_tools = {"artifact_save", "artifact_get", "artifact_update", "artifact_list", "artifact_versions"}
+        with self._binding_lock:
+            return tuple(sorted(
+                binding.public_name for binding in self.bindings.values()
+                if binding.server_name == "kirocrew-core"
+                and binding.server_name in self._live_verified_servers
+                and binding.tool_name in safe_tools
+                and (allowed is None or allowed(binding))
+            ))
+
     def tool_specs(
         self, names: Collection[str] | None = None, *, verified_only: bool = False
     ) -> list[dict[str, Any]]:
@@ -872,9 +905,16 @@ class McpManager:
             return f"Error: MCP tool reported failure\n{rendered}"
         return rendered
 
-    def call(self, public_name: str, arguments: dict[str, Any]) -> str:
+    def call_with_status(self, public_name: str, arguments: dict[str, Any]) -> McpCallOutcome:
+        """Call one MCP tool, preserving protocol status independently of text.
+
+        The historical ``call() -> str`` API remains available for other callers.
+        Pre-dispatch rejection is not a remote side-effect uncertainty; a call
+        error *after* invoking the server is. Unexpected exceptions propagate
+        to the turn dispatcher where they are terminally recorded and sanitized.
+        """
         if self._closed:
-            return "Error: MCP session is closed; tool was not dispatched."
+            return McpCallOutcome("Error: MCP session is closed; tool was not dispatched.", True)
         with self._binding_lock:
             binding = self.bindings.get(public_name)
         if binding is None:
@@ -884,17 +924,22 @@ class McpManager:
             with self._binding_lock:
                 binding = self.bindings.get(public_name)
         if binding is None:
-            return f"Error: unknown tool {public_name}. Do not retry nonexistent tools; use only functions present in the supplied tool list."
+            return McpCallOutcome(
+                f"Error: unknown tool {public_name}. Do not retry nonexistent tools; use only functions present in the supplied tool list.",
+                True,
+            )
         if self._closed:
-            return "Error: MCP session is closed; tool was not dispatched."
+            return McpCallOutcome("Error: MCP session is closed; tool was not dispatched.", True)
         if not self.is_live_binding(public_name):
-            return f"Error: tool {public_name} is not verified in the current Crew session."
+            return McpCallOutcome(
+                f"Error: tool {public_name} is not verified in the current Crew session.", True,
+            )
         server = self.servers.get(binding.server_name)
         if server is None:
-            return f"Error: MCP server {binding.server_name} is unavailable"
+            return McpCallOutcome(f"Error: MCP server {binding.server_name} is unavailable", True)
         try:
             if self._closed:
-                return "Error: MCP session is closed; tool was not dispatched."
+                return McpCallOutcome("Error: MCP session is closed; tool was not dispatched.", True)
             was_running = server.is_running()
             t0 = time.perf_counter()
             result = server.call(binding.tool_name, arguments)
@@ -908,8 +953,31 @@ class McpManager:
                 self._remember_tools(server)
                 self._rebuild_bindings()
         except McpError as exc:
-            return f"Error: {exc}"
-        return self._render_tool_result(result)
+            # This is a model-facing tool result and also enters the durable
+            # transcript/trace. Never forward arbitrary peer/transport error
+            # strings: they can contain authorization URLs, tokens, headers or
+            # server-supplied JSON-RPC data.  Preserve the *fact* of a failed
+            # dispatched call (unknown side effect) without leaking its payload.
+            if isinstance(exc, McpInputRequired):
+                detail = (
+                    "MCP tool requires interactive client input, which this "
+                    "KiroCrew bridge does not support. Do not automatically "
+                    "repeat the tool call."
+                )
+            elif isinstance(exc, McpJsonRpcError):
+                detail = "MCP tool returned a JSON-RPC error."
+            elif isinstance(exc, McpProtocolError):
+                detail = "MCP tool returned an unusable protocol response."
+            else:
+                detail = "MCP tool transport failed."
+            return McpCallOutcome(f"Error: {detail}", True, True)
+        # The server's isError flag, *not* a string prefix, is authoritative.
+        is_error = isinstance(result, dict) and result.get("isError") is True
+        return McpCallOutcome(self._render_tool_result(result), is_error, True)
+
+    def call(self, public_name: str, arguments: dict[str, Any]) -> str:
+        """Legacy model-facing text API (kept for older call sites)."""
+        return self.call_with_status(public_name, arguments).text
 
     def close(self) -> None:
         self._closed = True

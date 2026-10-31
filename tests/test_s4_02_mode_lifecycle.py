@@ -72,7 +72,7 @@ def test_incompatible_versions_and_reserved_modes_never_activate(tmp_path):
         invalid["plugin_version"] = "2.0.0-alpha"
         with pytest.raises(PolicyPackError, match="plugin_version"):
             install_or_update_mode(invalid)
-        assert get_policy_pack("dyna").enabled is False
+        assert get_policy_pack("dyna").enabled is True
 
 
 def test_monotonic_version_checksum_guard_and_manual_edit_protection(tmp_path):

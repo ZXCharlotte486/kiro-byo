@@ -20,6 +20,7 @@ from kiro_byo.config import KiroByoConfig, ModelSpec, ProviderSpec
 from kiro_byo.mcp_client import DEFERRED_TOOL_SEARCH_NAME, ToolBinding
 from kiro_byo.providers import ChatTurn, OpenAICompatibleInterrupted, ProviderTransportError, ToolCall, UsageInfo
 from kiro_byo.protocol import type_selection_id
+from kiro_byo.tool_display import tool_display_title
 from kiro_byo.sandbox import SandboxError
 from kiro_byo.telemetry import TurnTelemetryStore
 
@@ -1296,7 +1297,10 @@ class NativeToolAcpTests(unittest.TestCase):
             }
         )
         req = out.wait_for(lambda m: m.get("method") == "session/request_permission")
-        self.assertEqual(req["params"]["toolCall"]["title"], "read")
+        self.assertEqual(
+            req["params"]["toolCall"]["title"],
+            tool_display_title("read", native_name="read"),
+        )
         self.assertIn("../secret.txt", req["params"]["_meta"]["kiro"]["consent"]["resource"])
         # Nothing executes until the user/host approves the directory access.
         self.assertFalse(
@@ -1435,6 +1439,67 @@ class AcpCrew09SavedAgentTests(unittest.TestCase):
         self.assertEqual(captured[0][0], {"role": "system", "content": "SAVED AGENT PROMPT"})
         inp.close()
         thread.join(3)
+
+    def test_real_provider_receives_crew_identity_and_widget_guidance_on_first_turn(self) -> None:
+        captured: list[list[dict[str, Any]]] = []
+        def fake_turn(provider, model, messages, emit, **kwargs):
+            captured.append(messages)
+            emit('hello')
+            return ChatTurn(text='hello')
+        turn_mod.chat_completion_turn = fake_turn
+        inp, out = QueueInput(), CaptureOutput()
+        server = AcpServer(stdin=inp, stdout=out)
+        thread = threading.Thread(target=server.run)
+        thread.start()
+        try:
+            inp.put({'jsonrpc': '2.0', 'id': 1, 'method': 'session/new', 'params': self._params('Crew member persona')})
+            sid = out.wait_for(lambda m: m.get('id') == 1)['result']['sessionId']
+            inp.put({'jsonrpc': '2.0', 'id': 2, 'method': 'session/prompt', 'params': {
+                'sessionId': sid, 'prompt': [{'type': 'text', 'text': '画一下tiga和dyna的形态图对比分析'}]
+            }})
+            out.wait_for(lambda m: m.get('id') == 2, timeout=8.0)
+            assert captured
+            self.assertEqual(captured[0][0], {'role': 'system', 'content': 'Crew member persona'})
+            joined = '\n'.join(str(row.get('content') or '') for row in captured[0] if row.get('role') == 'system')
+            self.assertIn('Host application: KiroCrew', joined)
+            self.assertIn('Execution backend: Kiro BYO', joined)
+            self.assertIn('Crew-projected agent id: agent-a', joined)
+            self.assertIn('<mcwidget title=', joined)
+            self.assertIn('not the model\'s personal identity', joined) if 'Active BYO Mode:' in joined else self.assertIn('concrete model direct', joined)
+        finally:
+            inp.close()
+            thread.join(4)
+            server._executor.shutdown(wait=True)
+
+    def test_dyna_flash_is_explained_as_current_crew_backend_type(self) -> None:
+        self.config = replace(self.config, mode_pack="dyna", mode_type="flash")
+        captured: list[list[dict[str, Any]]] = []
+        def fake_turn(provider, model, messages, emit, **kwargs):
+            captured.append(messages)
+            emit("ok")
+            return ChatTurn(text="ok")
+        turn_mod.chat_completion_turn = fake_turn
+        inp, out = QueueInput(), CaptureOutput()
+        server = AcpServer(stdin=inp, stdout=out)
+        thread = threading.Thread(target=server.run)
+        thread.start()
+        try:
+            inp.put({"jsonrpc": "2.0", "id": 1, "method": "session/new", "params": self._params()})
+            sid = out.wait_for(lambda m: m.get("id") == 1)["result"]["sessionId"]
+            self.assertEqual(server._get_session(sid).model, type_selection_id("dyna", "flash"))
+            inp.put({"jsonrpc": "2.0", "id": 2, "method": "session/prompt", "params": {
+                "sessionId": sid, "prompt": [{"type": "text", "text": "你是哪种形态？"}]
+            }})
+            out.wait_for(lambda m: m.get("id") == 2, timeout=8.0)
+            self.assertTrue(captured)
+            system = "\n".join(str(row.get("content") or "") for row in captured[0] if row.get("role") == "system")
+            self.assertIn("Host application: KiroCrew", system)
+            self.assertIn("Active BYO Mode: dyna; active Type: flash", system)
+            self.assertNotIn("Model selection: concrete model direct", system)
+        finally:
+            inp.close()
+            thread.join(4)
+            server._executor.shutdown(wait=True)
 
     def test_prompt_injects_auto_reasoning_language_into_real_provider_messages(self) -> None:
         captured: list[list[dict[str, Any]]] = []

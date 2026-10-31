@@ -6,8 +6,12 @@ that the deterministic router can blend with static/curated model priors.
 
 Only facts we can actually observe are adapted today:
 
-* speed: recent first-visible and total turn latency, relative to peers;
-* reliability: recent success/error outcomes, including the current task class.
+* speed: completed-turn first-visible and total latency, relative to peers;
+* reliability: completed turns and attributable model/provider failures.
+
+A user cancellation, interruption, tool checkpoint failure or BYO internal
+failure is still visible in diagnostics, but it is not evidence that the
+selected model is unreliable. Synthetic trace events carry the same boundary.
 
 Quality/cost priors remain catalog facts until Kiro BYO has a trustworthy,
 provider-neutral signal for them. This prevents "learning" made-up facts from
@@ -131,6 +135,42 @@ class AdaptiveRoutingSnapshot:
 
 _SNAPSHOT_CACHE: dict[tuple[Any, ...], AdaptiveRoutingSnapshot] = {}
 _SNAPSHOT_CACHE_LOCK = threading.Lock()
+# Recency-weighted evidence must age even if no one writes to either ledger.
+# This is a cache refresh cadence, not a model-scoring or Type weight.
+_SNAPSHOT_CACHE_TTL_SECONDS = 60.0
+
+
+# This classifier changes *only* router feedback, never raw telemetry or
+# request-outcome statistics. Old telemetry has no category: retain its explicit
+# errors as legacy evidence, while modern non-provider categories fail closed.
+_MODEL_FAILURE_CATEGORIES = frozenset({"", "provider", "transport"})
+
+
+def _model_evidence_outcome(row: Mapping[str, Any]) -> bool | None:
+    """Return success/failure for attributable model observations, else None.
+
+    ProviderInterrupted was historically emitted by Reviewer events without a
+    category, so recognize that legacy marker as a host-control outcome too.
+    """
+    outcome = str(row.get("outcome") or "").strip().lower()
+    if outcome == "success":
+        return True
+    if outcome not in {"error", "failed"}:
+        return None
+    if str(row.get("error_category") or "").strip().lower() not in _MODEL_FAILURE_CATEGORIES:
+        return None
+    if str(row.get("error_kind") or "") == "ProviderInterrupted":
+        return None
+    return False
+
+
+def _finite_number(value: Any, default: float) -> float:
+    """Do not let malformed old/local diagnostics break model selection."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    return number if math.isfinite(number) else default
 
 
 def snapshot_from_rows(
@@ -151,6 +191,10 @@ def snapshot_from_rows(
         model = str(row.get("served_model") or "").strip()
         if not provider or not model:
             continue
+        # A cancelled-only or control-failure-only model has no reliability or
+        # speed observation. Keep those outcomes in the raw ledger, not here.
+        if _model_evidence_outcome(row) is None:
+            continue
         buckets.setdefault((provider, model), []).append(row)
 
     interim: dict[tuple[str, str], dict[str, Any]] = {}
@@ -163,19 +207,22 @@ def snapshot_from_rows(
         successes = 0
         task_samples = 0
         for row in model_rows:
-            timestamp = float(row.get("timestamp") or 0.0)
+            attributable = _model_evidence_outcome(row)
+            if attributable is None:
+                continue
+            timestamp = _finite_number(row.get("timestamp"), 0.0)
             weight = _recency_weight(timestamp, now, adaptive_profile)
-            success = 1.0 if str(row.get("outcome") or "") == "success" else 0.0
+            success = 1.0 if attributable else 0.0
             weighted_success.append((success, weight))
-            if success:
+            if attributable:
                 successes += 1
             row_profile = str(row.get("task_profile") or "")
             if task_key and row_profile == task_key:
                 task_samples += 1
                 task_weighted_success.append((success, weight))
-            if success:
-                first = float(row.get("first_visible_ms") or -1.0)
-                total = float(row.get("total_ms") or -1.0)
+            if attributable:
+                first = _finite_number(row.get("first_visible_ms"), -1.0)
+                total = _finite_number(row.get("total_ms"), -1.0)
                 if first >= 0:
                     ttfts.append(first)
                 if total >= 0:
@@ -199,7 +246,7 @@ def snapshot_from_rows(
         task_weighted = _weighted_mean(task_weighted_success) if task_weighted_success else None
         latency_index = _weighted_mean(latency_values)
         interim[key] = {
-            "samples": len(model_rows),
+            "samples": len(weighted_success),
             "successful_samples": successes,
             "task_samples": task_samples,
             "success_rate": weighted,
@@ -288,8 +335,13 @@ def runtime_failure_rows(trace: RuntimeTraceStore | None = None, *, limit: int =
             model = str(data.get("review_model") or "")
         if not provider or not model:
             continue
+        if str(data.get("error") or "") == "ProviderInterrupted":
+            continue
+        category = str(data.get("error_category") or "").strip().lower()
+        if category not in _MODEL_FAILURE_CATEGORIES:
+            continue
         out.append({
-            "timestamp": float(event.get("timestamp") or 0.0),
+            "timestamp": _finite_number(event.get("timestamp"), 0.0),
             "provider_id": provider,
             "served_model": model,
             "outcome": "error",
@@ -297,6 +349,8 @@ def runtime_failure_rows(trace: RuntimeTraceStore | None = None, *, limit: int =
             "first_visible_ms": -1.0,
             "total_ms": -1.0,
             "adaptive_source": name,
+            "error_category": category,
+            "error_kind": str(data.get("error") or ""),
         })
     return out
 
@@ -342,7 +396,7 @@ def current_snapshot(
     )
     with _SNAPSHOT_CACHE_LOCK:
         cached = _SNAPSHOT_CACHE.get(key)
-        if cached is not None:
+        if cached is not None and 0.0 <= time.time() - cached.generated_at < _SNAPSHOT_CACHE_TTL_SECONDS:
             return cached
     try:
         rows = store.recent(limit)

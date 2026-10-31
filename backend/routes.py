@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import shutil
 from pathlib import Path
 from typing import Any, Callable
@@ -55,6 +56,7 @@ from ..src.kiro_byo.provider_admin import (
 from ..src.kiro_byo.telemetry import TurnTelemetryStore
 from ..src.kiro_byo.runtime_trace import RuntimeTraceStore
 from ..src.kiro_byo.durable_runs import DurableRunStore
+from ..src.kiro_byo.record_center import records_snapshot
 from ..src.kiro_byo.acp_conformance import conformance_report
 from ..src.kiro_byo.routing_dashboard import build_routing_dashboard
 from ..src.kiro_byo.crew_linkage import (backend_id, check_member_sync, linkage_snapshot, linkage_change_plan, model_pin_allowed, role_pin, background_execution_snapshot)
@@ -68,7 +70,7 @@ def _version() -> str:
     try:
         return (APP_ROOT / "VERSION").read_text(encoding="utf-8").strip()
     except OSError:
-        return "0.9.13"
+        return "unknown"
 
 
 
@@ -247,6 +249,69 @@ async def get_status(request: web.Request, ctx: Any) -> web.Response:
     })
 
 
+
+@guarded
+async def get_mode_sync(request: web.Request, ctx: Any) -> web.Response:
+    """Read-only comparison of App mode and the host model catalog's source.
+
+    /api/models runs in KiroCrew's agents handler, while the BYO App writes
+    ctx.data_dir. Different config roots or an older host patch can therefore
+    make the UI show Dyna and the chat picker offer only Tiga. Report evidence
+    without touching sessions, secrets, or model selections.
+    """
+    from ..src.kiro_byo.config import load_catalog_config
+    from ..src.kiro_byo.paths import use_app_home as scoped_home
+
+    home = _data_dir(ctx)
+    app_path = home / "config" / "providers.json"
+    result: dict[str, Any] = {
+        "app_config_exists": app_path.is_file(),
+        "app_config_sha256": _sha256_file(app_path),
+        "app_config_path": str(app_path),
+        "host": _harness_state(),
+        "app_bundle": _deployment_info(),
+        "catalogue_comparison": "unavailable",
+    }
+    try:
+        from kiro_crew.apps.manager import app_dir
+        crew_path = app_dir("kiro-byo") / "data" / "config" / "providers.json"
+        result["crew_catalog_path"] = str(crew_path)
+        result["crew_catalog_exists"] = crew_path.is_file()
+        result["crew_catalog_sha256"] = _sha256_file(crew_path)
+        result["same_config_file"] = app_path.resolve() == crew_path.resolve()
+        with scoped_home(home):
+            app_cfg = await asyncio.to_thread(load_catalog_config, app_path)
+        with scoped_home(crew_path.parents[1]):
+            crew_cfg = await asyncio.to_thread(load_catalog_config, crew_path)
+        result["app_mode"] = {
+            "pack": str(app_cfg.mode_pack or "").lower(),
+            "type": str(app_cfg.mode_type or "").lower(),
+            "models_present": bool(app_cfg.models),
+        }
+        result["crew_catalog_mode"] = {
+            "pack": str(crew_cfg.mode_pack or "").lower(),
+            "type": str(crew_cfg.mode_type or "").lower(),
+            "models_present": bool(crew_cfg.models),
+        }
+        same = result["app_mode"] == result["crew_catalog_mode"]
+        result["catalogue_comparison"] = "match" if same else "mismatch"
+        # These are immutable-on-read markers, not a claim that the browser
+        # actually loaded this HTML or that its React Query state is current.
+        _, _, site_packages = running_crew()
+        crew_package = Path(site_packages) / "kiro_crew"
+        agents = crew_package / "dashboard" / "handlers" / "agents.py"
+        index = crew_package / "static" / "dist" / "index.html"
+        agent_source = agents.read_text(encoding="utf-8", errors="replace") if agents.is_file() else ""
+        index_source = index.read_text(encoding="utf-8", errors="replace") if index.is_file() else ""
+        result["installed_host_patches"] = {
+            "byo_catalogue_handler": "async def _kiro_byo_models(" in agent_source,
+            "mode_watch_script": "kiro-byo:mode-refresh-attempt:v3" in index_source,
+            "dashboard_label_marker": "kiro-byo:crew11-type-labels:v1" in index_source,
+        }
+    except Exception as exc:
+        result["probe_error"] = type(exc).__name__
+    return _ok(result)
+
 @guarded
 async def get_presets(request: web.Request, ctx: Any) -> web.Response:
     return _ok({"presets": list_provider_presets()})
@@ -254,7 +319,7 @@ async def get_presets(request: web.Request, ctx: Any) -> web.Response:
 
 @guarded
 async def get_routing_dashboard(request: web.Request, ctx: Any) -> web.Response:
-    """Read-only Tiga adaptive-routing observability for the Modes page."""
+    """Read-only active Mode adaptive-routing observability for the Modes page."""
     home = _ensure_app_state(ctx)
     with use_app_home(home):
         store = default_credential_store()
@@ -419,6 +484,42 @@ async def update_reasoning_language(request: web.Request, ctx: Any) -> web.Respo
     return _ok({"reasoning_language": settings})
 
 
+async def _reconcile_mode_change_with_crew(request: web.Request, pack: str = "") -> tuple[str, int]:
+    """Notify cold Crew slots after a committed BYO mode change.
+
+    A running ACP session keeps its existing routing plan. This is best-effort:
+    the App may run without the patched Crew dashboard, so a missing host seam
+    must never undo an already committed BYO configuration update.
+    """
+    try:
+        state = request.app.get("state")
+        if state is None:
+            return "host_unavailable", 0
+        from kiro_crew.dashboard import chat_handlers
+        reconcile = getattr(chat_handlers, "_kiro_byo_reconcile_slot_routing", None)
+        if not callable(reconcile):
+            return "host_unavailable", 0
+        changed = await reconcile(state)
+        # Never report success when real slots still carry the previous Mode.
+        # In-flight/linked sessions intentionally defer, so this is a pending
+        # count, not an error and not permission to reset them unsafely.
+        outstanding = 0
+        if pack:
+            for slot in list(getattr(state, "_slots", {}).values()):
+                model = str(getattr(slot, "model", "") or "").strip().lower()
+                parts = model.split(":")
+                if len(parts) == 3 and parts[0] == "kiro-byo-type" and parts[1] != pack:
+                    outstanding += 1
+        return ("pending" if outstanding else "updated" if changed else "unchanged"), outstanding
+    except Exception:
+        # The host integration must remain non-authoritative over mode config,
+        # but do not hide a failed cross-surface sync from diagnostics.
+        logging.getLogger(__name__).warning(
+            "Kiro BYO mode saved, but Crew cold-slot synchronization failed", exc_info=True
+        )
+        return "host_sync_unavailable", 0
+
+
 @guarded
 async def update_mode(request: web.Request, ctx: Any) -> web.Response:
     body = await request.json()
@@ -432,7 +533,10 @@ async def update_mode(request: web.Request, ctx: Any) -> web.Response:
             mode = await asyncio.to_thread(set_mode_selection, policy, pack)
         else:
             mode = await asyncio.to_thread(set_mode_pack, pack)
-    return _ok({"mode": mode})
+    host_sync, pending_slots = await _reconcile_mode_change_with_crew(
+        request, str(mode.get("pack") or "").lower()
+    )
+    return _ok({"mode": mode, "host_sync": host_sync, "host_sync_pending_slots": pending_slots})
 
 
 @guarded
@@ -795,6 +899,25 @@ def _task_execution_kind(job: Any) -> str:
     return "agent"
 
 
+def _require_byo_in_locked_document(document: dict, config_file: Path) -> None:
+    """Recheck the main Harness inside Crew's locked config mutation.
+
+    A preflight ``KiroCrewConfig.load`` may become stale while the request is
+    validating BYO model choices.  The document passed to ``mutate`` is the
+    latest locked state, so a concurrent main-backend switch must abort here.
+    Config.local.json overrides are deliberately rejected: writing the base
+    document while a higher-priority mode is active is never safe.
+    """
+    if _known_local_agent_override(config_file, "acp_backend"):
+        raise IntegrationError(
+            "Crew config.local.json overrides agent.acp_backend; "
+            "BYO model editing is unavailable"
+        )
+    agent = document.get("agent")
+    if not isinstance(agent, dict) or str(agent.get("acp_backend") or "").strip() != "kiro-byo":
+        raise IntegrationError("Crew main Harness changed; refresh before saving a BYO model")
+
+
 def _selection_rows(config: Any) -> list[dict[str, str]]:
     """Selections Crew may persist while BYO is the active Harness.
 
@@ -803,21 +926,25 @@ def _selection_rows(config: Any) -> list[dict[str, str]]:
     stores both in the same ``model`` string fields.
     """
     rows: list[dict[str, str]] = []
+    # Crew's /api/models and the ACP runtime only expose Mode Types when
+    # there is at least one executable concrete model. Keep the task console
+    # and its write-time whitelist consistent with that same invariant.
+    public_models = list(config.public_models)
     try:
         registry = load_mode_registry()
         plugin = registry.get(str(getattr(config, "mode_pack", "") or ""))
-        if plugin is not None and plugin.enabled:
+        if public_models and plugin is not None and plugin.enabled:
             for policy in plugin.pack.policies:
                 rows.append({
                     "id": type_selection_id(plugin.id, policy.id),
-                    "name": f"{plugin.pack.display_name} · {policy.display_name}",
+                    "name": f"{getattr(plugin.pack, 'short_name', '') or plugin.pack.display_name} · {policy.display_name}",
                     "kind": "type",
                 })
     except Exception:
         pass
     rows.extend(
         {"id": public_id, "name": model.name, "kind": "concrete"}
-        for public_id, model in config.public_models
+        for public_id, model in public_models
     )
     return rows
 
@@ -945,6 +1072,7 @@ async def update_chat_model(request: web.Request, ctx: Any) -> web.Response:
         if _known_local_agent_override(path, "model"):
             raise IntegrationError("Crew config.local.json overrides agent.model; edit it in Crew first")
         def mutate(doc: dict) -> dict:
+            _require_byo_in_locked_document(doc, path)
             agent = doc.get("agent")
             if not isinstance(agent, dict):
                 agent = {}
@@ -988,6 +1116,7 @@ async def update_member_model(request: web.Request, ctx: Any) -> web.Response:
         from kiro_crew.config.loader import KiroCrewConfig, config_path, update_config_locked
         path = config_path()
         def mutate(doc: dict) -> dict:
+            _require_byo_in_locked_document(doc, path)
             agents = doc.get("agents")
             if not isinstance(agents, dict) or member not in agents or not isinstance(agents.get(member), dict):
                 raise ValueError(f"Crew mate not found: {member}")
@@ -1031,7 +1160,9 @@ async def update_background_model(request: web.Request, ctx: Any) -> web.Respons
     def _write() -> str:
         from kiro_crew.config.loader import KiroCrewConfig, config_path, update_config_locked
 
+        path = config_path()
         def mutate(doc: dict) -> dict:
+            _require_byo_in_locked_document(doc, path)
             agent = doc.get("agent")
             if not isinstance(agent, dict):
                 agent = {}
@@ -1047,9 +1178,9 @@ async def update_background_model(request: web.Request, ctx: Any) -> web.Respons
             role_models["background"] = requested
             return doc
 
-        if _known_local_agent_override(config_path(), "role_models", "background"):
+        if _known_local_agent_override(path, "role_models", "background"):
             raise IntegrationError("Crew config.local.json overrides the background model; edit it in Crew first")
-        update_config_locked(config_path(), mutate=mutate)
+        update_config_locked(path, mutate=mutate)
         agent = KiroCrewConfig.load().agent
         stored = role_pin(agent, "background")
         effective = str(agent.resolve_model("background") or "auto")
@@ -1059,6 +1190,36 @@ async def update_background_model(request: web.Request, ctx: Any) -> web.Respons
     if not result["verified"]:
         raise IntegrationError("Crew background model mismatch after save; verify native config overrides")
     return _ok({"background": result})
+
+
+# Only serializes this App's requests within one Gateway event loop. It cannot
+# make Crew's independent scheduler/dashboard mutations atomic; a native Cron
+# CAS API is required for full cross-surface conflict safety.
+_CRON_APP_WRITE_LOCK = asyncio.Lock()
+
+
+async def _native_cron_job(service: Any, job_id: str) -> Any:
+    """Read Cron's authoritative job instead of trusting a mutation response.
+
+    This is a post-write verification, NOT a compare-and-swap transaction:
+    a concurrent native Crew update can still occur between any two awaits.
+    """
+    jobs = await service.list_jobs_async(include_disabled=True)
+    return next((row for row in jobs if str(getattr(row, "id", "")) == job_id), None)
+
+
+async def _verify_byo_after_cron_write() -> None:
+    """Detect a host switch while an asynchronous Cron write was in flight.
+
+    A failed postcondition is deliberately *not* rolled back: native Crew may
+    already have applied the write, and a rollback could erase another edit.
+    """
+    selected = await asyncio.to_thread(_crew_linkage_sync)
+    if selected["main"]["configured_backend"] != "kiro-byo":
+        raise IntegrationError(
+            "Crew main Harness changed during the Cron update; the change may "
+            "already have been saved. Refresh and inspect the native task"
+        )
 
 
 @guarded
@@ -1081,26 +1242,34 @@ async def update_task_model(request: web.Request, ctx: Any) -> web.Response:
         raise IntegrationError("BYO schedule model editing is disabled when Crew uses an official Harness")
     if not model_pin_allowed(selected_backend=selected["main"]["configured_backend"], model=requested, byo_models=valid):
         raise IntegrationError("Unknown BYO scheduled-task selection")
-    service = _cron_service(request)
-    # Read the actual Crew job before every edit, including clearing a pin.
-    # Otherwise a script job or a stale BYO browser tab can be overwritten.
-    jobs = await service.list_jobs_async(include_disabled=True)
-    job = next((row for row in jobs if str(getattr(row, "id", "")) == job_id), None)
-    if job is None:
-        raise ValueError(f"scheduled task not found: {job_id}")
-    if _task_execution_kind(job) != "agent":
-        raise ValueError("Script/Command Cron does not execute an AI model")
-    expected = body.get("expected_model")
-    current = str(getattr(job, "model", "") or "")
-    if expected is not None and current != str(expected or ""):
-        raise ValueError("Crew scheduled task model changed; refresh before saving")
-    updated = await service.update_job_async(job_id, model=requested)
-    if updated is None:
-        raise ValueError(f"scheduled task not found: {job_id}")
-    stored = str(getattr(updated, "model", "") or "")
-    if stored != requested:
-        raise IntegrationError("Crew scheduled task model mismatch after saving")
-    return _ok({"task": {"id": str(getattr(updated, "id", "") or ""), "model": stored, "verified": True}})
+    async with _CRON_APP_WRITE_LOCK:
+        _require_byo_main_backend()
+        service = _cron_service(request)
+        # Read the actual Crew job before every edit, including clearing a pin.
+        # Otherwise a script job or a stale BYO browser tab can be overwritten.
+        job = await _native_cron_job(service, job_id)
+        if job is None:
+            raise ValueError(f"scheduled task not found: {job_id}")
+        if _task_execution_kind(job) != "agent":
+            raise ValueError("Script/Command Cron does not execute an AI model")
+        expected = body.get("expected_model")
+        current = str(getattr(job, "model", "") or "")
+        if expected is not None and current != str(expected or ""):
+            raise ValueError("Crew scheduled task model changed; refresh before saving")
+        updated = await service.update_job_async(job_id, model=requested)
+        if updated is None:
+            raise ValueError(f"scheduled task not found: {job_id}")
+        # Check Crew's stored result, not merely the object returned by the
+        # update API. Never report successful synchronization for a failed or
+        # lost Cron persistence operation.
+        persisted = await _native_cron_job(service, job_id)
+        if persisted is None:
+            raise IntegrationError("Crew scheduled task vanished after update; inspect the native task")
+        stored = str(getattr(persisted, "model", "") or "")
+        if stored != requested:
+            raise IntegrationError("Crew scheduled task model mismatch after saving; refresh the native task")
+        await _verify_byo_after_cron_write()
+    return _ok({"task": {"id": job_id, "model": stored, "verified": True}})
 
 
 @guarded
@@ -1116,19 +1285,67 @@ async def update_task_execution(request: web.Request, ctx: Any) -> web.Response:
     minimal = body.get("minimal_context")
     if not isinstance(persistent, bool) or not isinstance(minimal, bool):
         raise ValueError("persistent_session and minimal_context must be booleans")
-    _require_byo_main_backend()
-    updated = await _cron_service(request).update_job_async(
-        job_id, persistent_session=persistent, minimal_context=minimal
-    )
-    if updated is None:
-        raise ValueError(f"scheduled task not found: {job_id}")
+    # Optimistic concurrency for the BYO task console's context switches.
+    # Crew owns this state; never silently replace a newer native/UI choice
+    # made since the task page last refreshed. Missing expectations retain the
+    # previous API contract for older clients, but the shipped UI sends both.
+    expected_context = {}
+    for field in ("persistent_session", "minimal_context"):
+        key = "expected_" + field
+        if key in body:
+            if not isinstance(body[key], bool):
+                raise ValueError(f"{key} must be boolean")
+            expected_context[field] = body[key]
+
+    async with _CRON_APP_WRITE_LOCK:
+        _require_byo_main_backend()
+        service = _cron_service(request)
+        job = await _native_cron_job(service, job_id)
+        if job is None:
+            raise ValueError(f"scheduled task not found: {job_id}")
+        # Execution-context flags belong to agent jobs, not Script/Command
+        # jobs. The UI hides these controls; the API must enforce the same rule.
+        if _task_execution_kind(job) != "agent":
+            raise ValueError("Script/Command Cron does not execute an AI session")
+        for field, previous in expected_context.items():
+            if bool(getattr(job, field)) != previous:
+                raise ValueError("Crew scheduled task execution context changed; refresh before saving")
+        updated = await service.update_job_async(
+            job_id, persistent_session=persistent, minimal_context=minimal
+        )
+        if updated is None:
+            raise ValueError(f"scheduled task not found: {job_id}")
+        persisted = await _native_cron_job(service, job_id)
+        if persisted is None:
+            raise IntegrationError("Crew scheduled task vanished after update; inspect the native task")
+        if (bool(getattr(persisted, "persistent_session", not persistent)) != persistent or
+                bool(getattr(persisted, "minimal_context", not minimal)) != minimal):
+            raise IntegrationError("Crew scheduled task execution context mismatch after saving; refresh the native task")
+        await _verify_byo_after_cron_write()
     return _ok({
         "task": {
-            "id": str(getattr(updated, "id", "") or ""),
-            "persistent_session": bool(getattr(updated, "persistent_session", True)),
-            "minimal_context": bool(getattr(updated, "minimal_context", False)),
+            "id": job_id,
+            "persistent_session": persistent,
+            "minimal_context": minimal,
         }
     })
+
+
+@guarded
+async def get_record_center(request: web.Request, ctx: Any) -> web.Response:
+    """Read-only timeline and retained counts. Never changes ledger state."""
+    home = _ensure_app_state(ctx)
+    try:
+        limit = int(request.query.get("limit", "100"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid records limit") from exc
+    with use_app_home(home):
+        result = await asyncio.to_thread(
+            records_snapshot, limit=limit,
+            kind=str(request.query.get("kind", "")),
+            mode=str(request.query.get("mode", "")),
+        )
+    return _ok(result)
 
 
 @guarded
@@ -1169,11 +1386,11 @@ async def clear_diagnostics(request: web.Request, ctx: Any) -> web.Response:
     home = _ensure_app_state(ctx)
     with use_app_home(home):
         removed = await asyncio.to_thread(TurnTelemetryStore().clear)
-        # Requests, their bounded route feature vectors and event diagnostics
-        # form one user-visible history. Clearing it must reset all adaptive
-        # evidence, not leave orphan runtime failures influencing new routes.
-        removed_trace = await asyncio.to_thread(RuntimeTraceStore().clear)
-    return _ok({"cleared": True, "removed": removed, "removed_trace": removed_trace})
+        # Route feature vectors are stored on completed turns, so clearing
+        # telemetry resets their adaptive evidence. Runtime Trace is an
+        # independent execution ledger, not a derivative of request history.
+        # Keep real routing diagnostics and all Durable Runs untouched.
+    return _ok({"cleared": True, "removed": removed, "removed_trace": 0})
 
 
 
@@ -1188,9 +1405,12 @@ async def get_runtime_trace(request: web.Request, ctx: Any) -> web.Response:
     session_id = str(request.query.get("session_id", "") or "").strip()
     turn_id = str(request.query.get("turn_id", "") or "").strip()
     run_id = str(request.query.get("run_id", "") or "").strip()
+    event = str(request.query.get("event", "") or "").strip()
+    if len(event) > 128:
+        raise ValueError("event filter is too long")
     with use_app_home(home):
         store = RuntimeTraceStore()
-        events = await asyncio.to_thread(store.recent, limit, session_id=session_id, turn_id=turn_id, run_id=run_id)
+        events = await asyncio.to_thread(store.recent, limit, session_id=session_id, turn_id=turn_id, run_id=run_id, event=event)
         status = store.status()
     return _ok({"status": status, "events": events})
 
@@ -1295,6 +1515,7 @@ def register_routes(ctx: Any) -> list[AppRoute]:
         AppRoute("GET", "/presets", get_presets),
         AppRoute("GET", "/providers", get_providers),
         AppRoute("GET", "/routing", get_routing_dashboard),
+        AppRoute("GET", "/mode-sync", get_mode_sync),
         AppRoute("POST", "/providers/test", test_provider),
         AppRoute("POST", "/providers", save_provider),
         AppRoute("PUT", "/providers/{provider_id}/credential", replace_credential),
@@ -1316,6 +1537,7 @@ def register_routes(ctx: Any) -> list[AppRoute]:
         AppRoute("PUT", "/tasks/background-model", update_background_model),
         AppRoute("PUT", "/tasks/{job_id}/model", update_task_model),
         AppRoute("PUT", "/tasks/{job_id}/execution", update_task_execution),
+        AppRoute("GET", "/records", get_record_center),
         AppRoute("GET", "/diagnostics", get_diagnostics),
         AppRoute("DELETE", "/diagnostics", clear_diagnostics),
         AppRoute("GET", "/runtime-trace", get_runtime_trace),

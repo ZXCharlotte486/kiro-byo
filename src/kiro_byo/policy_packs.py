@@ -823,9 +823,9 @@ def _discover_policy_packs(*, include_errors: bool = False) -> tuple[PolicyPack,
         except PolicyPackError as exc:
             errors.append({"path": str(path), "error": str(exc)})
             continue
-        # Dyna remains non-executable even when a user manually writes an
-        # enabled JSON policy. Tiga's historical manual override is preserved
-        # to avoid silently invalidating existing user configurations.
+        # The built-in executable Dyna is reserved: a custom policy must not
+        # shadow its controlled implementation. Tiga's historical manual
+        # override remains for backwards compatibility.
         if pack.id == "dyna":
             errors.append({"path": str(path), "error": "mode id 'dyna' is reserved until Dyna is released"})
             continue

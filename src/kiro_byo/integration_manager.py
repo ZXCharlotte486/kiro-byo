@@ -59,10 +59,37 @@ class IntegrationTarget:
         return frozenset(str(v).replace("\\", "/") for v in configured)
 
 
+# The same 0.11 dashboard model-label bridge is used for every 0.11 RC
+# candidate. It validates the *installed* bundle's picker DOM contract before
+# touching index.html, not merely the Crew version number.
+_CREW11_RC1 = frozenset({"0.11.0-rc.1", "0.11.0rc1"})
+# Later 0.11.0 RCs and all 0.11.1 prereleases are eligible for semantic preflight.
+# This does NOT make an RC compatible: _adapter_matches checks all
+# source seams, imported contracts and the packaged dashboard picker before any
+# Crew files are modified. Future minor releases stay blocked.
+_CREW11_CANDIDATE_REGEX = r"^0\.11\.(?:0(?:-rc\.|rc)(?:[2-9]|[1-9][0-9]+)|1(?:-rc\.|rc)(?:[1-9]|[1-9][0-9]+))$"
+
+
+def _crew11_semantic_candidate(version: str) -> bool:
+    # The 0.11.0 tag and rc.5 point to the same upstream commit (343a199).
+    # Version alone does NOT establish compatibility: the adapter still
+    # verifies every imported symbol, owned source seam and dashboard DOM.
+    return version in {"0.11.0", "0.11.1"} or re.fullmatch(_CREW11_CANDIDATE_REGEX, version) is not None
+
+
 def _dashboard_discovery(target):
-    return (crew11_model_labels.discover_dashboard_patches
-            if target.crew_version in {"0.11.0-rc.1", "0.11.0rc1"}
-            else crew_dashboard_patch.discover_dashboard_patches)
+    if target.crew_version in _CREW11_RC1 or _crew11_semantic_candidate(target.crew_version):
+        # Prefer the App under review, never an older copied Gateway runtime.
+        # Source-only synthetic fixtures without an App resource retain the
+        # package-data behavior for compatibility with the contract tests.
+        adapter = getattr(target, "adapter_dir", None)
+        if adapter is not None:
+            asset = adapter.parents[2] / "src" / "kiro_byo" / "assets" / "crew11_ui_timing.js"
+            if asset.is_file():
+                return lambda crew_package: crew11_model_labels.discover_dashboard_patches(
+                    crew_package, timing_asset=asset)
+        return crew11_model_labels.discover_dashboard_patches
+    return crew_dashboard_patch.discover_dashboard_patches
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -501,6 +528,53 @@ def _literal_strings_bound_to(text: str, binding: str) -> frozenset[str]:
     return frozenset(found)
 
 
+def _export_contract_issues(raw_exports: dict[str, Any] | None, crew_package: Path) -> list[str]:
+    """Check imported collection exports against actual Crew module bindings.
+
+    This is independent of symbol/marker checks, and can be tested against a
+    synthetic source package without an installer transaction.
+    """
+    issues: list[str] = []
+    if raw_exports is None:
+        return issues
+    for relative, bindings in raw_exports.items():
+        rel = str(relative).replace("\\", "/")
+        if not rel.startswith(_PREFIX):
+            issues.append(f"{rel} (contract path outside KiroCrew source root)")
+            continue
+        if not isinstance(bindings, dict):
+            issues.append(f"{rel} (invalid contract export map)")
+            continue
+        target = crew_package / rel[len(_PREFIX):]
+        if not target.is_file():
+            issues.append(f"{rel} (missing overlay dependency)")
+            continue
+        try:
+            text = _normalized_text(target)
+        except OSError as exc:
+            issues.append(f"{rel} ({exc})")
+            continue
+        for binding, values in bindings.items():
+            if not isinstance(binding, str) or not binding or not isinstance(values, list) or not all(
+                isinstance(v, str) and v for v in values
+            ):
+                issues.append(f"{rel} (invalid contract export list)")
+                continue
+            try:
+                present = _literal_strings_bound_to(text, binding)
+            except SyntaxError as exc:
+                issues.append(f"{rel} (cannot parse overlay dependency: {exc.msg})")
+                break
+            missing = [value for value in values if value not in present]
+            if missing:
+                rendered = ", ".join(repr(v) for v in missing[:3])
+                suffix = " ..." if len(missing) > 3 else ""
+                issues.append(
+                    f"{rel} (overlay export contract moved; {binding} missing {rendered}{suffix})"
+                )
+    return issues
+
+
 def compatibility_contract_issues(compat: dict[str, Any], crew_package: Path) -> list[str]:
     """Validate unmodified upstream symbols the owned overlay imports.
 
@@ -567,42 +641,7 @@ def compatibility_contract_issues(compat: dict[str, Any], crew_package: Path) ->
             suffix = " ..." if len(missing) > 3 else ""
             issues.append(f"{rel} (overlay contract moved; missing {rendered}{suffix})")
 
-    if raw_exports is not None:
-        for relative, bindings in raw_exports.items():
-            rel = str(relative).replace("\\", "/")
-            if not rel.startswith(_PREFIX):
-                issues.append(f"{rel} (contract path outside KiroCrew source root)")
-                continue
-            if not isinstance(bindings, dict):
-                issues.append(f"{rel} (invalid contract export map)")
-                continue
-            target = crew_package / rel[len(_PREFIX):]
-            if not target.is_file():
-                issues.append(f"{rel} (missing overlay dependency)")
-                continue
-            try:
-                text = _normalized_text(target)
-            except OSError as exc:
-                issues.append(f"{rel} ({exc})")
-                continue
-            for binding, values in bindings.items():
-                if not isinstance(binding, str) or not binding or not isinstance(values, list) or not all(
-                    isinstance(v, str) and v for v in values
-                ):
-                    issues.append(f"{rel} (invalid contract export list)")
-                    continue
-                try:
-                    present = _literal_strings_bound_to(text, binding)
-                except SyntaxError as exc:
-                    issues.append(f"{rel} (cannot parse overlay dependency: {exc.msg})")
-                    break
-                missing = [value for value in values if value not in present]
-                if missing:
-                    rendered = ", ".join(repr(v) for v in missing[:3])
-                    suffix = " ..." if len(missing) > 3 else ""
-                    issues.append(
-                        f"{rel} (overlay export contract moved; {binding} missing {rendered}{suffix})"
-                    )
+    issues.extend(_export_contract_issues(raw_exports, crew_package))
     return issues
 
 
@@ -661,8 +700,18 @@ def _adapter_matches(
         except IntegrationError:
             return False, ["invalid family_regex"], manifest, compat
     allowed = compat.get("allowed_crew_versions")
-    if isinstance(allowed, list) and crew_version not in allowed:
-        return False, [f"Crew version {crew_version!r} is not in this adapter's pinned release list"], manifest, compat
+    is_candidate = False
+    if compat["transformer"] == "adaptive11":
+        # Do not let adapter metadata broaden the approved 0.11 family.
+        if compat.get("semantic_candidate_regex") != _CREW11_CANDIDATE_REGEX:
+            return False, ["invalid semantic_candidate_regex contract"], manifest, compat
+        is_candidate = _crew11_semantic_candidate(crew_version)
+        if not isinstance(allowed, list) or not all(isinstance(v, str) for v in allowed):
+            return False, ["invalid allowed_crew_versions metadata"], manifest, compat
+        if crew_version not in allowed and not is_candidate:
+            return False, [f"Crew version {crew_version!r} is not in this adapter's supported candidate family"], manifest, compat
+    elif isinstance(allowed, list) and crew_version not in allowed:
+        return False, [f"Crew version {crew_version!r} is not in this adapter's allowed list"], manifest, compat
     maximum = str(compat.get("max_version_exclusive") or "")
     if maximum:
         current_core = _version_core(crew_version)
@@ -718,8 +767,18 @@ def _adapter_matches(
             # differ. Retain all pins, but only accept an unpinned variant when
             # the stricter semantic inspector and convergent transform pass.
             pinned = compat.get("pinned_source_sha256")
-            is_pinned = True
-            if isinstance(pinned, dict):
+            # Two added 0.11 turn-clock owners were not present in the earlier
+            # RC1 archive pinset. Only these exact paths may use an unpinned,
+            # strict semantic+compile preflight; never exempt an arbitrary seam.
+            clock_seams = {
+                "src/kiro_crew/dashboard/chat_turn/turn_dispatch_gates.py",
+                "src/kiro_crew/dashboard/chat_turn/turn_stats.py",
+            }
+            unpinned_clock = relative in clock_seams and set(
+                compat.get("semantic_clock_seams_unpinned") or []
+            ) == clock_seams
+            is_pinned = False if unpinned_clock else True
+            if not unpinned_clock and isinstance(pinned, dict):
                 record = pinned.get(relative)
                 if not isinstance(record, dict) or not all(
                     isinstance(record.get(key), str) and len(record[key]) == 64
@@ -729,6 +788,10 @@ def _adapter_matches(
                     continue
                 current = _normalized_sha(target)
                 is_pinned = current in {record["pristine"], record["patched"]}
+            elif not unpinned_clock:
+                # Old 0.10 fixture/adapters do not have per-file pins.
+                # Crew 0.11 still requires its 21 exact pins in release checks.
+                is_pinned = True
             transform_files, transform_error, inspect_fn, transform_fn = _transformer_for(compat)
             if relative not in transform_files:
                 bad.append(f"{relative} (no bundled transform)")
@@ -768,17 +831,35 @@ def _adapter_matches(
             continue
 
         bad.append(f"{relative} (unclassified Crew seam; expected generated_files or created_files)")
+
+    # New RC builds are not audited/pinned. In addition to the 21 semantic
+    # Python seams, their packaged React model-picker must still expose the
+    # BYO label bridge's exact DOM contracts. Never pass a new RC merely
+    # because its version was listed as a candidate.
+    if is_candidate:
+        try:
+            app_asset = adapter_dir.parents[2] / "src" / "kiro_byo" / "assets" / "crew11_ui_timing.js"
+            if app_asset.is_file():
+                crew11_model_labels.discover_dashboard_patches(crew_package, timing_asset=app_asset)
+            else:
+                crew11_model_labels.discover_dashboard_patches(crew_package)
+        except (crew_dashboard_patch.DashboardPatchError, OSError, UnicodeError) as exc:
+            bad.append(f"src/kiro_crew/static/dist (candidate model-picker contract changed: {exc})")
     return not bad, bad, manifest, compat
 
 
 def resolve_target(app_root: Path, app_home: Path | None = None) -> IntegrationTarget:
     crew_version, crew_package, site_packages = running_crew()
     core = _version_core(crew_version)
-    if core != (0, 11, 0) or crew_version not in {"0.11.0-rc.1", "0.11.0rc1"}:
+    if core not in {(0, 11, 0), (0, 11, 1)} or not (
+        crew_version in _CREW11_RC1 or _crew11_semantic_candidate(crew_version)
+    ):
         raise IntegrationError(
-            f"KiroCrew {crew_version} is not supported by BYO 0.2.5: "
-            "target is exactly Crew 0.11.0-rc.1. Legacy Crew 0.10 support is retired; "
-            "other builds require a separate source-contract audit."
+            f"KiroCrew {crew_version} is not supported by BYO 0.3.0: "
+            "only audited Crew 0.11.0-rc.1, guarded 0.11.0-rc.N (N >= 2), "
+            "guarded 0.11.1-rc.N (N >= 1), or exact 0.11.0 / 0.11.1 releases "
+            "may enter strict "
+            "source-contract preflight. This does not claim 0.11.1 is source-audited."
         )
     root = app_root / "integration" / "kiro_crew"
     matches: list[IntegrationTarget] = []
@@ -1074,6 +1155,9 @@ def integration_status(app_root: Path, app_home: Path) -> dict[str, Any]:
             "verified_through": str(target.compatibility.get("verified_through") or ""),
             "verified_commit": str(target.compatibility.get("verified_commit") or ""),
             "version_audited": _version_audited(target.compatibility, target.crew_version),
+            "source_contract_checked_version": target.crew_version,
+            "source_contract_status": "passed" if target.crew_version else "unknown",
+            "source_contract_seams": len(target.manifest.get("files") or []),
             "installed": installed,
             "active": active,
             "restart_required": bool(installed and not active),
@@ -1102,6 +1186,9 @@ def integration_status(app_root: Path, app_home: Path) -> dict[str, Any]:
             "verified_through": "",
             "verified_commit": "",
             "version_audited": False,
+            "source_contract_status": "failed",
+            "source_contract_checked_version": crew_version,
+            "source_contract_seams": 0,
             "installed": False,
             "repairable": False,
             "repairable_files": [],
@@ -1167,41 +1254,163 @@ def _write_runtime_snapshot(
     return overlay_root, manifest_path, compatibility_path
 
 
-def install_from_app(app_root: Path, app_home: Path, *, version: str) -> dict[str, Any]:
-    """Install/update the ACP integration transactionally.
+def _plan_created_seam(
+    target: IntegrationTarget, app_home: Path, rel: str, dst: Path,
+    persistent_backup: Path,
+) -> tuple[dict[str, Any], Path]:
+    """A created (BYO-owned) seam must never overwrite a foreign Crew file."""
+    src = target.overlay_root / rel
+    if not src.is_file():
+        raise IntegrationError(f"missing created-file overlay: {rel}")
+    existed_before = dst.exists()
+    if existed_before:
+        if not dst.is_file():
+            raise IntegrationError(f"created-file target is not a file: {rel}")
+        current_hash = _normalized_sha(dst)
+        if not _created_file_is_owned(
+            target=dst, packaged_overlay=src, app_home=app_home,
+            crew_version=target.crew_version, relative=rel,
+        ):
+            raise IntegrationError(
+                f"refusing to replace foreign file at Kiro BYO-created path: {rel}"
+            )
+    else:
+        current_hash = ""
+    return {
+        "rel": rel,
+        "dst": dst,
+        "current_hash": current_hash,
+        "output_path": src,
+        "backup_text": None,
+        "persistent_backup": persistent_backup,
+        "existed_before": existed_before,
+        "created_file": True,
+    }, src
 
-    The transactional installer has two invariants that older installers did not have:
 
-    * **preflight first** -- every Crew seam must be proven clean/patched (or
-      recoverable from a pristine Kiro BYO backup) before the first Crew source
-      file is changed;
-    * **rollback on write failure** -- if any later write/runtime step fails,
-      every Crew source touched by this transaction is restored to the exact
-      bytes present when the transaction started.
+def _resolve_owned_generated_baseline(
+    *, app_home: Path, safe_version: str, rel: str,
+    persistent_backup: Path, inspect_fn: Any, transform_error: type[Exception],
+) -> tuple[str, bool]:
+    """Check pristine backup or recover its recorded hash; never guess a baseline."""
+    if persistent_backup.is_file():
+        try:
+            pristine_text = _normalized_text(persistent_backup)
+            backup_inspection = inspect_fn(rel, pristine_text)
+        except (OSError, transform_error) as exc:
+            raise IntegrationError(
+                f"cannot validate pristine backup for {rel}: {exc}"
+            ) from exc
+        if backup_inspection.state != "clean":
+            raise IntegrationError(
+                f"pristine backup for {rel} is not clean; restore/update Kiro Crew once"
+            )
+        return _sha_text(pristine_text), False
+    previous = _read_json(
+        app_home / "data" / "integration-runtime" / safe_version / "compatibility.json"
+    )
+    previous_base = (
+        previous.get("base_sha256")
+        if isinstance(previous.get("base_sha256"), dict)
+        else {}
+    )
+    base_hash = str(previous_base.get(rel) or "")
+    return base_hash, not bool(base_hash)
 
-    This also repairs the specific partial-write failure mode where an early seam was
-    written and a later semantic check aborted, leaving a ``partial/foreign
-    Kiro BYO patch`` behind.
+
+def _plan_generated_seam(
+    target: IntegrationTarget, app_home: Path, safe_version: str,
+    rel: str, dst: Path, persistent_backup: Path,
+) -> tuple[dict[str, Any], str, str, bool, bool]:
+    """Preflight one semantic generated seam and declare its expected output.
+
+    Return (plan, output, pristine hash, partial recovered, missing baseline).
+    All transformation remains fail-closed, including partial-write recovery.
     """
-    target = resolve_target(app_root, app_home)
-    app_home.mkdir(parents=True, exist_ok=True)
-    old_home = migrate_legacy_data(app_home, target.site_packages)
+    if not dst.is_file():
+        raise IntegrationError(f"missing Crew seam: {rel}")
+    current_text = _normalized_text(dst)
+    current_hash = _sha_text(current_text)
+    transform_files, transform_error, inspect_fn, transform_fn = _transformer_for(
+        target.compatibility
+    )
+    if rel not in transform_files:
+        raise IntegrationError(f"no bundled semantic transformer for Crew seam: {rel}")
+    try:
+        inspection = inspect_fn(rel, current_text)
+    except (OSError, transform_error) as exc:
+        raise IntegrationError(f"cannot inspect changed Crew seam {rel}: {exc}") from exc
 
-    safe_version = _safe_version_token(target.crew_version)
-    backup_root = app_home / "data" / "backups" / f"packaged-{safe_version}"
-    if old_home is not None:
-        old_backup = old_home / "data" / "backups" / f"packaged-{safe_version}"
-        if old_backup.is_dir() and not backup_root.exists():
-            shutil.copytree(old_backup, backup_root)
+    backup_text: str | None = None
+    recovered = False
+    missing_baseline = False
+    if inspection.state == "clean":
+        pristine_text = current_text
+        base_hash = current_hash
+        patched_text = _converge_semantic_transform(
+            rel, pristine_text, inspect_fn=inspect_fn, transform_fn=transform_fn,
+            transform_error=transform_error,
+        )
+        if not persistent_backup.exists():
+            backup_text = pristine_text
+    elif inspection.state in {"patched", "upgradeable"}:
+        # Keep upgrading owned seams even when the pristine backup went missing.
+        # Destructive uninstall stays fail-closed if the baseline is unproven.
+        if inspection.state == "upgradeable":
+            patched_text = _converge_semantic_transform(
+                rel, current_text, inspect_fn=inspect_fn, transform_fn=transform_fn,
+                transform_error=transform_error,
+            )
+        else:
+            patched_text = current_text
+        base_hash, missing_baseline = _resolve_owned_generated_baseline(
+            app_home=app_home, safe_version=safe_version, rel=rel,
+            persistent_backup=persistent_backup, inspect_fn=inspect_fn,
+            transform_error=transform_error,
+        )
+    else:
+        # Never transform a partial/foreign seam directly. Recover only from
+        # a baseline the semantic inspector proves pristine.
+        recovery = _clean_recovery_text(
+            app_home=app_home, crew_version=target.crew_version,
+            relative=rel, inspect_fn=inspect_fn, transform_error=transform_error,
+        )
+        if recovery is None:
+            raise IntegrationError(
+                f"refusing to transform changed Crew seam: {rel} "
+                f"({inspection.detail or 'transform anchors differ'})"
+            )
+        pristine_text = recovery
+        base_hash = _sha_text(pristine_text)
+        patched_text = _converge_semantic_transform(
+            rel, pristine_text, inspect_fn=inspect_fn, transform_fn=transform_fn,
+            transform_error=transform_error,
+        )
+        recovered = True
 
-    # Preflight builds every intended output in memory / from the packaged
-    # overlay. Nothing under kiro_crew is written in this phase.
+    return {
+        "rel": rel,
+        "dst": dst,
+        "current_hash": current_hash,
+        "output_text": patched_text,
+        "backup_text": backup_text,
+        "persistent_backup": persistent_backup,
+        "existed_before": True,
+        "created_file": False,
+    }, patched_text, base_hash, recovered, missing_baseline
+
+
+def _prepare_seam_install_plans(
+    target: IntegrationTarget, app_home: Path, safe_version: str,
+) -> tuple[
+    list[dict[str, Any]], dict[str, str | Path], dict[str, str], list[str], list[str]
+]:
+    """Plan the Crew source writes without changing any Crew files."""
     plans: list[dict[str, Any]] = []
     installed_outputs: dict[str, str | Path] = {}
     runtime_base_hashes: dict[str, str] = {}
     recovered_files: list[str] = []
     baseline_missing_files: list[str] = []
-    dashboard_assets: list[str] = []
 
     for raw in target.manifest.get("files") or []:
         rel = str(raw).replace("\\", "/")
@@ -1209,173 +1418,43 @@ def install_from_app(app_root: Path, app_home: Path, *, version: str) -> dict[st
             continue
         dst = target.crew_package / rel[len(_PREFIX):]
         persistent_backup = _backup_for(app_home, target.crew_version, rel)
-
-        # Crew 0.10 supports host-specific HarnessAdapter modules as normal Python
-        # files.  Kiro BYO owns its dedicated harness module, so a clean Crew
-        # install legitimately has no destination file yet.  Treat this as a
-        # create-only overlay and fail closed if some foreign file already
-        # occupies the path.
         if rel in target.created_files:
-            src = target.overlay_root / rel
-            if not src.is_file():
-                raise IntegrationError(f"missing created-file overlay: {rel}")
-            existed_before = dst.exists()
-            if existed_before:
-                if not dst.is_file():
-                    raise IntegrationError(f"created-file target is not a file: {rel}")
-                current_hash = _normalized_sha(dst)
-                if not _created_file_is_owned(
-                    target=dst,
-                    packaged_overlay=src,
-                    app_home=app_home,
-                    crew_version=target.crew_version,
-                    relative=rel,
-                ):
-                    raise IntegrationError(
-                        f"refusing to replace foreign file at Kiro BYO-created path: {rel}"
-                    )
-            else:
-                current_hash = ""
-            installed_outputs[rel] = src
-            plans.append(
-                {
-                    "rel": rel,
-                    "dst": dst,
-                    "current_hash": current_hash,
-                    "output_path": src,
-                    "backup_text": None,
-                    "persistent_backup": persistent_backup,
-                    "existed_before": existed_before,
-                    "created_file": True,
-                }
+            plan, output = _plan_created_seam(
+                target, app_home, rel, dst, persistent_backup,
             )
-            continue
-
-        if not dst.is_file():
-            raise IntegrationError(f"missing Crew seam: {rel}")
-        current_text = _normalized_text(dst)
-        current_hash = _sha_text(current_text)
-
-        if rel in target.generated_files:
-            transform_files, transform_error, inspect_fn, transform_fn = _transformer_for(
-                target.compatibility
+        elif rel in target.generated_files:
+            plan, output, base_hash, recovered, missing_baseline = _plan_generated_seam(
+                target, app_home, safe_version, rel, dst, persistent_backup,
             )
-            if rel not in transform_files:
-                raise IntegrationError(f"no bundled semantic transformer for Crew seam: {rel}")
-            try:
-                inspection = inspect_fn(rel, current_text)
-            except (OSError, transform_error) as exc:
-                raise IntegrationError(f"cannot inspect changed Crew seam {rel}: {exc}") from exc
-
-            backup_text: str | None = None
-            if inspection.state == "clean":
-                pristine_text = current_text
-                base_hash = current_hash
-                patched_text = _converge_semantic_transform(
-                    rel,
-                    pristine_text,
-                    inspect_fn=inspect_fn,
-                    transform_fn=transform_fn,
-                    transform_error=transform_error,
-                )
-                if not persistent_backup.exists():
-                    backup_text = pristine_text
-            elif inspection.state in {"patched", "upgradeable"}:
-                # A seam that is already provably owned by Kiro BYO does not need
-                # a pristine backup merely to let an App upgrade continue.  In
-                # particular, older installs sometimes lost the backup directory
-                # while leaving the generated Crew seam intact.  We still refuse
-                # destructive uninstall later when that pristine baseline cannot
-                # be proven.
-                if inspection.state == "upgradeable":
-                    patched_text = _converge_semantic_transform(
-                        rel,
-                        current_text,
-                        inspect_fn=inspect_fn,
-                        transform_fn=transform_fn,
-                        transform_error=transform_error,
-                    )
-                else:
-                    patched_text = current_text
-
-                if persistent_backup.is_file():
-                    try:
-                        pristine_text = _normalized_text(persistent_backup)
-                        backup_inspection = inspect_fn(rel, pristine_text)
-                    except (OSError, transform_error) as exc:
-                        raise IntegrationError(
-                            f"cannot validate pristine backup for {rel}: {exc}"
-                        ) from exc
-                    if backup_inspection.state != "clean":
-                        raise IntegrationError(
-                            f"pristine backup for {rel} is not clean; restore/update Kiro Crew once"
-                        )
-                    base_hash = _sha_text(pristine_text)
-                else:
-                    previous = _read_json(
-                        app_home
-                        / "data"
-                        / "integration-runtime"
-                        / safe_version
-                        / "compatibility.json"
-                    )
-                    previous_base = (
-                        previous.get("base_sha256")
-                        if isinstance(previous.get("base_sha256"), dict)
-                        else {}
-                    )
-                    base_hash = str(previous_base.get(rel) or "")
-                    if not base_hash:
-                        baseline_missing_files.append(rel)
-            else:
-                # Known partial-write recovery. We never patch *from* the
-                # partial file. A current-semantic inspector must prove that the
-                # saved baseline is pristine, then we regenerate the complete
-                # output from that pristine text.
-                recovery = _clean_recovery_text(
-                    app_home=app_home,
-                    crew_version=target.crew_version,
-                    relative=rel,
-                    inspect_fn=inspect_fn,
-                    transform_error=transform_error,
-                )
-                if recovery is None:
-                    raise IntegrationError(
-                        f"refusing to transform changed Crew seam: {rel} "
-                        f"({inspection.detail or 'transform anchors differ'})"
-                    )
-                pristine_text = recovery
-                base_hash = _sha_text(pristine_text)
-                patched_text = _converge_semantic_transform(
-                    rel,
-                    pristine_text,
-                    inspect_fn=inspect_fn,
-                    transform_fn=transform_fn,
-                    transform_error=transform_error,
-                )
-                recovered_files.append(rel)
-
             runtime_base_hashes[rel] = base_hash
-            installed_outputs[rel] = patched_text
-            plans.append(
-                {
-                    "rel": rel,
-                    "dst": dst,
-                    "current_hash": current_hash,
-                    "output_text": patched_text,
-                    "backup_text": backup_text,
-                    "persistent_backup": persistent_backup,
-                    "existed_before": True,
-                    "created_file": False,
-                }
+            if recovered:
+                recovered_files.append(rel)
+            if missing_baseline:
+                baseline_missing_files.append(rel)
+        else:
+            # Preserve the original fail-closed exception for unclassified seams.
+            if not dst.is_file():
+                raise IntegrationError(f"missing Crew seam: {rel}")
+            raise IntegrationError(
+                f"unclassified Crew 0.10 seam in manifest: {rel}; "
+                "expected generated_files or created_files"
             )
-            continue
+        installed_outputs[rel] = output
+        plans.append(plan)
 
-        raise IntegrationError(
-            f"unclassified Crew 0.10 seam in manifest: {rel}; "
-            "expected generated_files or created_files"
-        )
+    return plans, installed_outputs, runtime_base_hashes, recovered_files, baseline_missing_files
 
+
+def _append_dashboard_install_plans(
+    target: IntegrationTarget,
+    app_home: Path,
+    plans: list[dict[str, Any]],
+    installed_outputs: dict[str, str | Path],
+    runtime_base_hashes: dict[str, str],
+    baseline_missing_files: list[str],
+) -> tuple[list[str], Path]:
+    """Validate and plan dashboard guard patches without mutating assets."""
+    dashboard_assets: list[str] = []
     # KiroCrew 0.10 shares one model catalogue within a page lifetime. The
     # dashboard guard keeps Chat and non-Chat lifetimes surface-pure and avoids
     # patching content-hashed Vite/Rollup helpers. Synthetic/test Crew packages
@@ -1418,12 +1497,235 @@ def install_from_app(app_root: Path, app_home: Path, *, version: str) -> dict[st
                 "dashboard_asset": True,
             })
 
+    return dashboard_assets, dashboard_dist
+
+
+def _verify_installed_seams(
+    target: IntegrationTarget,
+    plans: list[dict[str, Any]],
+    dashboard_dist: Path,
+) -> None:
+    """Read-only commit gate: exact output hashes and generated semantic closure.
+
+    Failures raise IntegrationError inside the install transaction, preserving
+    the caller's original rollback, snapshot and fail-closed behavior.
+    """
+    # Verify the exact committed bytes before installing/updating the ACP
+    # runtime.  Earlier Crew builds could report "written" even when a host-side
+    # replace/filter left one Crew seam in the old partial state.  A
+    # successful integration transaction therefore means every planned seam is
+    # already the exact output that passed preflight.
+    commit_mismatches: list[str] = []
+    for plan in plans:
+        dst = plan["dst"]
+        if "output_text" in plan:
+            expected = _sha_text(str(plan["output_text"]))
+            actual = _normalized_sha(dst)
+        else:
+            expected = _normalized_sha(Path(plan["output_path"]))
+            actual = _normalized_sha(dst)
+        if actual != expected:
+            commit_mismatches.append(plan["rel"])
+    if commit_mismatches:
+        raise IntegrationError(
+            "integration commit verification failed for: "
+            + ", ".join(commit_mismatches)
+        )
+
+    # Byte equality only proves that the installer wrote what it planned.
+    # The stronger integration invariant is semantic closure: every
+    # generated seam must already inspect as ``patched`` and the dashboard
+    # guard must need no further rewrite.  This catches the exact class of
+    # failure where a one-pass owned upgrade writes successfully but the
+    # immediate post-install audit still reports ``upgradeable`` or
+    # ``dashboard-unpatched``.
+    semantic_mismatches: list[str] = []
+    _semantic_files, semantic_error, semantic_inspect, _semantic_transform = (
+        _transformer_for(target.compatibility)
+    )
+    for plan in plans:
+        rel = str(plan["rel"])
+        if rel not in target.generated_files:
+            continue
+        try:
+            inspection = semantic_inspect(rel, _normalized_text(plan["dst"]))
+        except (OSError, semantic_error) as exc:
+            semantic_mismatches.append(f"{rel}: error ({exc})")
+            continue
+        if inspection.state != "patched":
+            semantic_mismatches.append(
+                f"{rel}: {inspection.state} "
+                f"({inspection.detail or 'semantic integration not closed'})"
+            )
+
+    if dashboard_dist.is_dir():
+        try:
+            committed_dashboard = _dashboard_discovery(target)(
+                target.crew_package
+            )
+        except crew_dashboard_patch.DashboardPatchError as exc:
+            semantic_mismatches.append(f"src/kiro_crew/static/dist: {exc}")
+        else:
+            for asset in committed_dashboard:
+                if asset.changed:
+                    rel = _PREFIX + asset.path.relative_to(target.crew_package).as_posix()
+                    semantic_mismatches.append(
+                        f"{rel}: dashboard guard still requires another rewrite"
+                    )
+
+    if semantic_mismatches:
+        raise IntegrationError(
+            "integration semantic commit verification failed for: "
+            + "; ".join(semantic_mismatches)
+        )
+
+
+
+def _commit_runtime_and_install_metadata(
+    *,
+    target: IntegrationTarget,
+    app_root: Path,
+    app_home: Path,
+    version: str,
+    backup_root: Path,
+    effective_overlay: Path,
+    effective_manifest: Path,
+    effective_compat: Path,
+    dashboard_assets: list[str],
+    baseline_missing_files: list[str],
+    recovered_files: list[str],
+) -> None:
+    """Copy the ACP runtime and persist install metadata inside the caller's transaction.
+
+    Do not catch errors here: install_from_app must roll back Crew files,
+    runtime package, bootstrap pth, integration metadata and runtime snapshot
+    together if any step fails.
+    """
+    runtime_dst = target.site_packages / "kiro_byo"
+    pth_path = target.site_packages / "kiro_byo_bootstrap.pth"
+    integration_path = app_home / "data" / "integration.json"
+    # Install the ACP runtime next to KiroCrew's Python. Copy files in-place
+    # so Windows does not need to rename a package directory another child
+    # may have open.
+    runtime_src = app_root / "src" / "kiro_byo"
+    runtime_dst.mkdir(parents=True, exist_ok=True)
+    runtime_files = {
+        src.relative_to(runtime_src)
+        for src in runtime_src.rglob("*")
+        if src.is_file() and "__pycache__" not in src.parts and src.suffix != ".pyc"
+    }
+    # Same-version reinstalls are supported. Remove files previously
+    # owned by the copied runtime that no longer exist in this build so
+    # stale modules cannot survive indefinitely. Bootstrap state is
+    # generated below and therefore excluded from source membership.
+    for old in sorted(runtime_dst.rglob("*"), reverse=True):
+        if not old.is_file() or "__pycache__" in old.parts or old.suffix == ".pyc":
+            continue
+        rel = old.relative_to(runtime_dst)
+        if rel == Path("_bootstrap_state.json"):
+            continue
+        if rel not in runtime_files:
+            old.unlink(missing_ok=True)
+    for rel in sorted(runtime_files):
+        _atomic_copy(runtime_src / rel, runtime_dst / rel)
+
+    app_build = _app_build_id(app_root)
+    state = {
+        "kiro_byo_version": version,
+        "kiro_byo_build": app_build,
+        "kiro_byo_home": str(app_home),
+        "kiro_crew_home": "",
+        "crew_package": str(target.crew_package),
+        "overlay_version": target.adapter_dir.name,
+        "overlay_root": str(effective_overlay),
+        "manifest_path": str(effective_manifest),
+        "compatibility_path": str(effective_compat),
+        "detected_version": target.crew_version,
+        "installed_via": "kirocrew-app",
+    }
+    _atomic_write_text(
+        json.dumps(state, ensure_ascii=False, indent=2) + "\n",
+        runtime_dst / "_bootstrap_state.json",
+    )
+    _atomic_write_text("import kiro_byo.bootstrap_patch\n", pth_path)
+
+    integration = {
+        "kiro_byo_version": version,
+        "kiro_byo_build": app_build,
+        "installed_by_pid": os.getpid(),
+        "baseline": target.baseline,
+        "detected_version": target.crew_version,
+        "overlay_version": target.adapter_dir.name,
+        "generated_files": sorted(target.generated_files),
+        "created_files": sorted(target.created_files),
+        "dashboard_assets": sorted(dashboard_assets),
+        "baseline_missing_files": sorted(set(baseline_missing_files)),
+        "backup_root": str(backup_root),
+        "runtime_overlay_root": str(effective_overlay),
+        "mode": "kirocrew-app",
+        "crew_package": str(target.crew_package),
+        "site_packages": str(target.site_packages),
+        "kiro_byo_home": str(app_home),
+        "recovered_partial_files": recovered_files,
+        "installed_at": datetime.now(timezone.utc).astimezone().isoformat(),
+    }
+    state_path = integration_path
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    _atomic_write_text(
+        json.dumps(integration, ensure_ascii=False, indent=2) + "\n", state_path
+    )
+
+
+def _persist_install_baselines(plans: list[dict[str, Any]]) -> None:
+    """Persist pristine source baselines only after every seam passes preflight."""
     # Persist pristine baselines only after *all* seams have preflighted.
     for plan in plans:
         backup_text = plan.get("backup_text")
         backup = plan["persistent_backup"]
         if backup_text is not None and not backup.exists():
             _atomic_write_text(str(backup_text), backup)
+
+
+
+def install_from_app(app_root: Path, app_home: Path, *, version: str) -> dict[str, Any]:
+    """Install/update the ACP integration transactionally.
+
+    The transactional installer has two invariants that older installers did not have:
+
+    * **preflight first** -- every Crew seam must be proven clean/patched (or
+      recoverable from a pristine Kiro BYO backup) before the first Crew source
+      file is changed;
+    * **rollback on write failure** -- if any later write/runtime step fails,
+      every Crew source touched by this transaction is restored to the exact
+      bytes present when the transaction started.
+
+    This also repairs the specific partial-write failure mode where an early seam was
+    written and a later semantic check aborted, leaving a ``partial/foreign
+    Kiro BYO patch`` behind.
+    """
+    target = resolve_target(app_root, app_home)
+    app_home.mkdir(parents=True, exist_ok=True)
+    old_home = migrate_legacy_data(app_home, target.site_packages)
+
+    safe_version = _safe_version_token(target.crew_version)
+    backup_root = app_home / "data" / "backups" / f"packaged-{safe_version}"
+    if old_home is not None:
+        old_backup = old_home / "data" / "backups" / f"packaged-{safe_version}"
+        if old_backup.is_dir() and not backup_root.exists():
+            shutil.copytree(old_backup, backup_root)
+
+    # Pure preflight/plan construction stays outside the write/rollback transaction.
+    # The source, dashboard contract, and output bytes are verified before touching Crew.
+    (
+        plans, installed_outputs, runtime_base_hashes,
+        recovered_files, baseline_missing_files,
+    ) = _prepare_seam_install_plans(target, app_home, safe_version)
+    dashboard_assets, dashboard_dist = _append_dashboard_install_plans(
+        target, app_home, plans, installed_outputs,
+        runtime_base_hashes, baseline_missing_files,
+    )
+
+    _persist_install_baselines(plans)
 
     # Snapshot the exact pre-transaction Crew files. If anything below fails,
     # restore these bytes so a failed update cannot manufacture another partial
@@ -1499,148 +1801,22 @@ def install_from_app(app_root: Path, app_home: Path, *, version: str) -> dict[st
                         _remove_pyc(dst)
                         wrote_any = True
 
-            # Verify the exact committed bytes before installing/updating the ACP
-            # runtime.  Earlier Crew builds could report "written" even when a host-side
-            # replace/filter left one Crew seam in the old partial state.  A
-            # successful integration transaction therefore means every planned seam is
-            # already the exact output that passed preflight.
-            commit_mismatches: list[str] = []
-            for plan in plans:
-                dst = plan["dst"]
-                if "output_text" in plan:
-                    expected = _sha_text(str(plan["output_text"]))
-                    actual = _normalized_sha(dst)
-                else:
-                    expected = _normalized_sha(Path(plan["output_path"]))
-                    actual = _normalized_sha(dst)
-                if actual != expected:
-                    commit_mismatches.append(plan["rel"])
-            if commit_mismatches:
-                raise IntegrationError(
-                    "integration commit verification failed for: "
-                    + ", ".join(commit_mismatches)
-                )
-
-            # Byte equality only proves that the installer wrote what it planned.
-            # The stronger integration invariant is semantic closure: every
-            # generated seam must already inspect as ``patched`` and the dashboard
-            # guard must need no further rewrite.  This catches the exact class of
-            # failure where a one-pass owned upgrade writes successfully but the
-            # immediate post-install audit still reports ``upgradeable`` or
-            # ``dashboard-unpatched``.
-            semantic_mismatches: list[str] = []
-            _semantic_files, semantic_error, semantic_inspect, _semantic_transform = (
-                _transformer_for(target.compatibility)
-            )
-            for plan in plans:
-                rel = str(plan["rel"])
-                if rel not in target.generated_files:
-                    continue
-                try:
-                    inspection = semantic_inspect(rel, _normalized_text(plan["dst"]))
-                except (OSError, semantic_error) as exc:
-                    semantic_mismatches.append(f"{rel}: error ({exc})")
-                    continue
-                if inspection.state != "patched":
-                    semantic_mismatches.append(
-                        f"{rel}: {inspection.state} "
-                        f"({inspection.detail or 'semantic integration not closed'})"
-                    )
-
-            if dashboard_dist.is_dir():
-                try:
-                    committed_dashboard = _dashboard_discovery(target)(
-                        target.crew_package
-                    )
-                except crew_dashboard_patch.DashboardPatchError as exc:
-                    semantic_mismatches.append(f"src/kiro_crew/static/dist: {exc}")
-                else:
-                    for asset in committed_dashboard:
-                        if asset.changed:
-                            rel = _PREFIX + asset.path.relative_to(target.crew_package).as_posix()
-                            semantic_mismatches.append(
-                                f"{rel}: dashboard guard still requires another rewrite"
-                            )
-
-            if semantic_mismatches:
-                raise IntegrationError(
-                    "integration semantic commit verification failed for: "
-                    + "; ".join(semantic_mismatches)
-                )
+            # Both byte identity and semantic closure are required before installing ACP.
+            _verify_installed_seams(target, plans, dashboard_dist)
 
             effective_overlay, effective_manifest, effective_compat = _write_runtime_snapshot(
                 target, app_home, installed_outputs, runtime_base_hashes, dashboard_assets
             )
 
-            # Install the ACP runtime next to KiroCrew's Python. Copy files in-place
-            # so Windows does not need to rename a package directory another child
-            # may have open.
-            runtime_src = app_root / "src" / "kiro_byo"
-            runtime_dst.mkdir(parents=True, exist_ok=True)
-            runtime_files = {
-                src.relative_to(runtime_src)
-                for src in runtime_src.rglob("*")
-                if src.is_file() and "__pycache__" not in src.parts and src.suffix != ".pyc"
-            }
-            # Same-version reinstalls are supported. Remove files previously
-            # owned by the copied runtime that no longer exist in this build so
-            # stale modules cannot survive indefinitely. Bootstrap state is
-            # generated below and therefore excluded from source membership.
-            for old in sorted(runtime_dst.rglob("*"), reverse=True):
-                if not old.is_file() or "__pycache__" in old.parts or old.suffix == ".pyc":
-                    continue
-                rel = old.relative_to(runtime_dst)
-                if rel == Path("_bootstrap_state.json"):
-                    continue
-                if rel not in runtime_files:
-                    old.unlink(missing_ok=True)
-            for rel in sorted(runtime_files):
-                _atomic_copy(runtime_src / rel, runtime_dst / rel)
-
-            app_build = _app_build_id(app_root)
-            state = {
-                "kiro_byo_version": version,
-                "kiro_byo_build": app_build,
-                "kiro_byo_home": str(app_home),
-                "kiro_crew_home": "",
-                "crew_package": str(target.crew_package),
-                "overlay_version": target.adapter_dir.name,
-                "overlay_root": str(effective_overlay),
-                "manifest_path": str(effective_manifest),
-                "compatibility_path": str(effective_compat),
-                "detected_version": target.crew_version,
-                "installed_via": "kirocrew-app",
-            }
-            _atomic_write_text(
-                json.dumps(state, ensure_ascii=False, indent=2) + "\n",
-                runtime_dst / "_bootstrap_state.json",
-            )
-            _atomic_write_text("import kiro_byo.bootstrap_patch\n", pth_path)
-
-            integration = {
-                "kiro_byo_version": version,
-                "kiro_byo_build": app_build,
-                "installed_by_pid": os.getpid(),
-                "baseline": target.baseline,
-                "detected_version": target.crew_version,
-                "overlay_version": target.adapter_dir.name,
-                "generated_files": sorted(target.generated_files),
-                "created_files": sorted(target.created_files),
-                "dashboard_assets": sorted(dashboard_assets),
-                "baseline_missing_files": sorted(set(baseline_missing_files)),
-                "backup_root": str(backup_root),
-                "runtime_overlay_root": str(effective_overlay),
-                "mode": "kirocrew-app",
-                "crew_package": str(target.crew_package),
-                "site_packages": str(target.site_packages),
-                "kiro_byo_home": str(app_home),
-                "recovered_partial_files": recovered_files,
-                "installed_at": datetime.now(timezone.utc).astimezone().isoformat(),
-            }
-            state_path = integration_path
-            state_path.parent.mkdir(parents=True, exist_ok=True)
-            _atomic_write_text(
-                json.dumps(integration, ensure_ascii=False, indent=2) + "\n", state_path
+            _commit_runtime_and_install_metadata(
+                target=target, app_root=app_root, app_home=app_home,
+                version=version, backup_root=backup_root,
+                effective_overlay=effective_overlay,
+                effective_manifest=effective_manifest,
+                effective_compat=effective_compat,
+                dashboard_assets=dashboard_assets,
+                baseline_missing_files=baseline_missing_files,
+                recovered_files=recovered_files,
             )
         except Exception as exc:
             # The user may already have had a partial state when this transaction

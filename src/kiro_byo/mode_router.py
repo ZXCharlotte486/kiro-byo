@@ -29,7 +29,7 @@ from .reasoning_control import ReasoningInvocation, resolve_thinking_mode, think
 _FAST = re.compile(r"(?:^|[-_. ])(flash|haiku|mini|nano|lite|fast|speed|ultraspeed|air)(?:$|[-_. ])", re.I)
 _STRONG = re.compile(r"(?:^|[-_. ])(pro|opus|max|ultra|premier|reasoner|reasoning)(?:$|[-_. ])", re.I)
 _BALANCED = re.compile(r"(?:^|[-_. ])(plus|sonnet|standard|medium)(?:$|[-_. ])", re.I)
-_CODE = re.compile(r"```|\b(?:code|coding|debug|refactor|compile|compiler|test|pytest|typescript|javascript|python|rust|java|c\+\+|sql|git)\b|代码|编程|调试|重构|编译|测试", re.I)
+_CODE = re.compile(r"```|\b(?:code|coding|debug|refactor|compile|compiler|test|pytest|typescript|javascript|python|rust|java|c\+\+|sql|git)\b|代码|编程|调试|重构|编译|测试|程式碼|原始碼|程式|測試|編譯|重構|コード|プログラム|テスト|リファクタ|코드|프로그래밍|테스트|디버깅|리팩터링", re.I)
 _COMPLEX = re.compile(r"\b(?:analy[sz]e|reason|prove|derive|architecture|design|investigate|compare|audit|research|multi[- ]?step)\b|分析|推理|证明|推导|架构|设计|调研|审计|比较|多步", re.I)
 _SIMPLE = re.compile(r"\b(?:translate|rewrite|summari[sz]e|format|rename|spell|define|what is|who is)\b|翻译|改写|总结|格式化|改名|是什么|叫什么", re.I)
 # Complexity must not hinge on an ever-growing vocabulary of task nouns.  The
@@ -41,8 +41,9 @@ _SIMPLE = re.compile(r"\b(?:translate|rewrite|summari[sz]e|format|rename|spell|d
 _CLAUSE_JOIN = re.compile(
     r"\b(?:and|then|while|whereas|plus|also|after|before|und|dann|sowie|"
     r"et|puis|ainsi\s+que|y|luego|adem[aá]s|e|depois|и|затем)\b"
-    r"|(?:并且|并|以及|同时|然后|而且|且|随后)"
-    r"|(?:そして|それから|かつ|また|さらに|したうえで|した上で)",
+    r"|(?:并且|并|以及|同时|然后|而且|且|随后|並且|並|以及|同時|然後|隨後)"
+    r"|(?:そして|それから|かつ|また|さらに|したうえで|した上で)"
+    r"|(?:그리고|또한|및|하고|하며|한\s*뒤|이후)",
     re.I,
 )
 _SENTENCE_BREAK = re.compile(r"[.!?。！？；;]+|\n+")
@@ -72,14 +73,16 @@ _TOOL_INTRINSIC = re.compile(
 )
 _TOOL_ACTION = re.compile(
     r"\b(?:open|read|inspect|check|review|audit|examine|look\s+at|take\s+a\s+look|find|locate|edit|modify|write|create|delete|remove|rename|list|scan|clean|cleanup|run|execute|query|send|schedule)\b"
-    r"|(?:打开|读取|查看|看看|看一下|检查|审查|审计|查找|找出|找一下|编辑|修改|写入|创建|删除|移除|重命名|列出|扫描|清理|运行|执行|查询|发送|安排)"
-    r"|(?:開いて|読む|読んで|見て|見てください|確認して|調査して|監査して|探して|編集して|修正して|書き込|作成して|削除して|名前を変|一覧|スキャン|クリーンアップ|実行して|問い合わせ|送信して|予定)",
+    r"|(?:打开|读取|查看|看看|看一下|检查|审查|审计|查找|找出|找一下|编辑|修改|写入|创建|删除|移除|重命名|列出|扫描|清理|运行|执行|查询|发送|安排|審查|檢查|查閱|讀取|修改|寫入|新增|刪除)"
+    r"|(?:開いて|読む|読んで|見て|見てください|確認して|調査して|監査して|探して|編集して|修正して|書き込|作成して|削除して|名前を変|一覧|スキャン|クリーンアップ|実行して|問い合わせ|送信して|予定)"
+    r"|(?:검토|확인|수정|추가|삭제|실행|검색|조사|작성)(?:하|해|할)|(?:읽어|열어|고쳐)",
     re.I,
 )
 _TOOL_TARGET = re.compile(
     r"\b(?:file|folder|directory|path|repository|repo|codebase|workspace|drive|disk|storage|desktop|downloads?|appdata|terminal|shell|command|database|email|calendar|webpage|website|url|link|browser)\b"
-    r"|(?:文件|文件夹|目录|路径|仓库|代码库|工作区|磁盘|硬盘|系统盘|盘符|存储|桌面|下载|终端|命令|数据库|邮件|邮箱|日历|网页|网站|链接|浏览器)"
-    r"|(?:ファイル|フォルダ|ディレクトリ|パス|リポジトリ|コードベース|ワークスペース|ドライブ|ディスク|ストレージ|デスクトップ|ダウンロード|ターミナル|シェル|コマンド|データベース|メール|カレンダー|ウェブページ|サイト|URL|リンク|ブラウザ)",
+    r"|(?:文件|文件夹|目录|路径|仓库|代码库|工作区|磁盘|硬盘|系统盘|盘符|存储|桌面|下载|终端|命令|数据库|邮件|邮箱|日历|网页|网站|链接|浏览器|檔案|資料夾|目錄|儲存庫|專案|資料庫)"
+    r"|(?:ファイル|フォルダ|ディレクトリ|パス|リポジトリ|コードベース|ワークスペース|ドライブ|ディスク|ストレージ|デスクトップ|ダウンロード|ターミナル|シェル|コマンド|データベース|メール|カレンダー|ウェブページ|サイト|URL|リンク|ブラウザ)"
+    r"|(?:파일|폴더|디렉터리|저장소|리포지토리|코드|프로젝트|작업\s*공간|데이터베이스|터미널|명령|웹사이트|브라우저)",
     re.I,
 )
 _TOOL_EXPLICIT = re.compile(r"\btool\b|工具|ツール", re.I)
@@ -87,8 +90,9 @@ _CONTINUE_CUE = re.compile(r"\b(?:continue|carry\s+on|keep\s+going|resume)\b|继
 _PATH_OR_URL = re.compile(r"(?:https?://|file://|(?:^|\s)(?:[A-Za-z]:[\\/]|/)\S+|[A-Za-z]\s*(?:盘|ドライブ))", re.I)
 _WRITE_ACTION = re.compile(
     r"\b(?:edit|modify|write|create|delete|remove|rename|refactor|fix|implement|commit|merge|deploy|install|uninstall|send|schedule)\b"
-    r"|(?:编辑|修改|写入|创建|删除|移除|重命名|重构|修复|提交|合并|部署|安装|卸载|发送|安排|实现(?:一下|这个|功能|代码|方案|方法|接口|类|函数))"
-    r"|(?:編集|修正|書き込|作成|削除|名前を変|リファクタ|修復|コミット|マージ|デプロイ|インストール|送信|実装(?:して|を|する))",
+    r"|(?:编辑|修改|写入|创建|删除|移除|重命名|重构|修复|提交|合并|部署|安装|卸载|发送|安排|实现(?:一下|这个|功能|代码|方案|方法|接口|类|函数)|編輯|寫入|建立|刪除|修復|新增|部署|安裝)"
+    r"|(?:編集|修正|書き込|作成|削除|名前を変|リファクタ|修復|コミット|マージ|デプロイ|インストール|送信|実装(?:して|を|する))"
+    r"|(?:수정|추가|삭제|작성|구현|배포|설치|제거|리팩터링)(?:하|해|할)|고쳐",
     re.I,
 )
 _RISK_ACTION = re.compile(
@@ -100,8 +104,9 @@ _RISK_ACTION = re.compile(
 _LATENCY_CUE = re.compile(r"\b(?:quick|quickly|fast|brief|short|simple|just)\b|(?:快速|尽快|简单|简短|直接)|(?:早く|速く|簡単|短く)", re.I)
 _BREADTH_CUE = re.compile(
     r"\b(?:all|every|whole|entire|across|compare|multiple|several|repository|codebase|global|comprehensive|audit)\b"
-    r"|(?:全部|所有|全局|整个|多个|多份|比较|全面|仓库|代码库|审计|排查)"
-    r"|(?:全部|すべて|全体|複数|比較|包括的|リポジトリ|コードベース|監査)",
+    r"|(?:全部|所有|全局|整个|多个|多份|比较|全面|仓库|代码库|审计|排查|全域|整個|多個|多份|比較|全面|儲存庫|審查)"
+    r"|(?:全部|すべて|全体|複数|比較|包括的|リポジトリ|コードベース|監査)"
+    r"|(?:전체|모든|여러|저장소|리포지토리|여러\s*모듈)",
     re.I,
 )
 

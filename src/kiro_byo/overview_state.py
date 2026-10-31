@@ -112,17 +112,6 @@ def build_overview_snapshot(
             "detail": "添加 Provider 并发现模型后即可从 KiroCrew 选择具体模型。",
             "action": "providers",
         })
-    elif failed_turns:
-        state = "degraded"
-        label = "有失败请求"
-        tone = "warning"
-        alerts.append({
-            "id": "recent-failures",
-            "tone": "warning",
-            "title": "最近存在失败的模型请求",
-            "detail": f"遥测摘要记录了 {failed_turns} 个失败 turn；可前往记录查看请求与路由元数据。",
-            "action": "records",
-        })
     else:
         state = "ready"
         label = "运行正常"
@@ -139,7 +128,18 @@ def build_overview_snapshot(
 
     return {
         "schema_version": 1,
+        # Runtime/integration facts drive global health. A failed or cancelled
+        # turn is a request outcome and must never downgrade the app shell.
         "health": {"state": state, "label": label, "tone": tone},
+        "runtime_health": {"state": state, "label": label, "tone": tone},
+        "request_outcome": {
+            "turns": int(diag.get("turns") or 0),
+            "success": int(diag.get("success") or 0),
+            "failed": failed_turns,
+            "cancelled": int(diag.get("cancelled") or 0),
+            "interrupted": int(diag.get("interrupted") or 0),
+            "error_categories": dict(_dict(diag.get("error_categories"))),
+        },
         "version": version,
         "crew_version": str(integ.get("crew_version") or "unknown"),
         "provider_count": provider_count,

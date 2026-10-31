@@ -1,3 +1,219 @@
+## 0.3.0 — SSSP-BYO user-supplied icon update (icon-only candidate)
+- Adopt the user-provided black-and-white horizontal SSSP-BYO logo without redesign. Store its original RGBA PNG byte-for-byte in `assets/logo_bw_text.png`.
+- Render the same artwork in the KiroCrew app gallery, sidebar and BYO heading. Gallery uses an unbordered white square preview; the sidebar/heading SVG embeds the exact uploaded raster and inverts it in dark mode.
+- Keep the host app id, backend routes, all Mode policies, integration logic and runtime configuration unchanged.
+- Status: offline asset and packaging checks only; KiroCrew desktop visual validation is still required.
+
+## 0.3.0 V16 — 0.11.1-rc.2 strict compatibility candidate (2026-11-01)
+
+- Recognize KiroCrew 0.11.1 prerelease versions (`-rc.N` / `rcN`) in the guarded local Source audit. The previous V15 preflight blocked them before checking source.
+- All installed 23 Crew semantic patch seams, cross-file import contracts, and the model picker DOM are still validated before any Crew source mutation. Unknown 0.11.2 / 0.12 releases remain blocked.
+- Source-audited baseline remains 0.11.0-rc.1; 0.11.1-rc.2 is **not** independently source-audited or desktop-E2E-verified.
+- No changes to Tiga/Dyna, Provider credentials, recovery, app icon, or the existing mode-switch reload workaround.
+
+## 0.3.0 V15 compatibility hotfix (2026-11-01)
+
+- Source audit and dashboard preflight read the UI timing JavaScript from the **candidate BYO App bundle**, not an obsolete copied Crew runtime. This repairs false incompatibility failures when site-packages has a stale/missing resource.
+- Exact KiroCrew 0.11.1 can enter source-contract preflight; it is **not** declared upstream source-audited, and installation still fails closed if source or UI contracts differ. Future 0.11.2 / 0.12 remain blocked until their own review.
+- Integration settings distinguish actual installed-source semantic checks from pinned upstream audit provenance in five UI languages.
+- No modifications to routing policies, ACP wire model IDs, data records, backups or removal behavior.
+
+## 2026-10-31 — 0.3.0 V13 Crew identity + first-turn native artifacts candidate
+- Supply factual KiroCrew host identity and current BYO runtime Mode/Type in the provider system context on **every turn**. Preserve Crew-authored agent persona and distinguish concrete-model bypass from active Type routing.
+- Advise the native inline `<mcwidget>` workflow on visualization requests; prefer Crew's verified widget Skill when available rather than silently writing an unrelated HTML file. Never claim that an artifact was saved without host confirmation, or invent numeric data for comparisons.
+- Expose a small set of verified first-party `kirocrew-core` artifact tools on explicit artifact requests. Respect saved-Agent MCP permissions, verified live brokers and existing tool approval; do not auto-preload artifact deletion or rollback.
+- Add multilingual intent, actual provider-prompt, Dyna/Type, authorization, provenance and safe tool-discovery tests. No independent artifact storage, no Mode routing changes, no ACP protocol or Durable Run changes.
+- Candidate only: Windows/macOS/Linux Crew Widget auto-registration, cross-session editing, versioning and live MCP permission flows still require actual host end-to-end validation.
+
+## 2026-10-31 — 0.3.0 V11 Provider preflight and diagnostic minimization candidate
+- Moved slow Provider discovery outside the cross-process `providers.json` read-modify-write lock for configure and refresh. Both commits re-read current state within the lock; a refresh rejects changed endpoint, provider family, credential reference, or credential contents instead of persisting stale results.
+- Restricted public Durable Run payloads to explicit status/identity/timing fields, lease status without owner token, and the model identifier consumed by the Records UI. No raw tool receipts, step objectives, checkpoints, or arbitrary metadata leave the diagnostics projection.
+- Added deterministic slow-discovery, stale-endpoint/credential, and public-data-leak regression tests. Recovery ledger storage, route weights, ACP protocol, and model IDs remain unchanged.
+- This is a candidate: Windows/macOS/Linux desktop E2E, live Provider and long-run stress tests remain outstanding. See `V11_OPTIMIZATION_REPORT_2026-10-31.md`.
+
+## 2026-10-31 — 0.3.0 V10 bounded security and state-governance candidate
+- Runtime Trace now masks known secret headers, embedded URL credentials, sensitive (including encoded) query keys, and auth fragments in both metadata and full diagnostic data. Existing previously written trace files are not modified.
+- Turn telemetry history clearing shares the same cross-process file transaction lock as appends and trimming.
+- Provider control-plane mutations serialize their entire read-modify-write transaction across processes using a stable sidecar lock; nested migration calls reuse the outer transaction.
+- Durable Run ordinary clear and history pruning use a shared protective rule: only safely completed records are eligible; running/failed/cancelled and uncertain records remain intact.
+- Added isolated concurrency, secret-scrubbing, and Durable Run regression tests. No Mode/Type routing, ACP protocol, user data or model ID migrations.
+- Cross-platform Crew UI E2E and live-provider endurance testing remain unverified.
+
+## 2026-10-31 — 0.3.0 Records Center phase 1 (read-only candidate)
+- Unified Records overview/timeline over existing bounded Turn, Runtime Trace and Durable Run ledgers; retained counts and safe correlation IDs.
+- Five-language Records Center copy and locale-aware time/number display. No Durable Run deletion or route-policy changes.
+- Added `GET /records` with bounded, metadata-only events. Original `/diagnostics` and `/runtime-trace` interfaces remain unchanged.
+
+## 2026-10-31 — 0.3.0 V5 模型目录同步观察与安全刷新（Windows E2E 待验收）
+
+## 0.3.0 V6 model-sync draft visibility hotfix (2026-10-31)
+
+- Skip hidden/invisible editor nodes when checking for unsent drafts before a guarded Crew reload; keep visible drafts and running turns protected.
+- Add five injected-script regression scenarios and a Windows acceptance checklist. This is a release candidate, not a verified zero-reload React cache fix.
+
+
+- Crew 主界面检测到后端返回 Dyna/Tiga 新模型目录时，若全部会话确认为空闲则自动刷新。
+- 当 `/api/chat/slots` 不可用、会话忙碌或存在未发送草稿时，展示同步阻塞信息而不是静默跳过；避免强制中断任务。
+- 两次自动重载后仍不收敛时给出提示而非无限循环；刷新防循环标记升级为 v3。
+- 只读 `/mode-sync` 诊断识别 V5 注入脚本；不更改模型路由、模型 ID 或用户数据。
+- 详细验证参见 `FIX_REPORT_0.3.0_MODEL_SYNC_V5_2026-10-31.md`；**未通过 Windows 实机端到端验收**。
+
+## 0.3.0 追加修复候选 — Crew 模型目录与当前 Mode 对齐（2026-10-31）
+
+- 修正此前的刷新收敛误判：composer 显示 Dyna 不等于菜单已经切到 Dyna，必须验证真实模型选项。
+- 模型列表探测改用真实 ARIA option 路径；打开模型菜单后立即检查，提供两次限速安全重试及跨 Mode 的防重载状态清理。
+- 新增只读 `/api/apps/kiro-byo/mode-sync` 和模式页异常提示，区分 Host 配置源差异、旧集成补丁和 React 模型缓存陈旧。
+- 不修改 Policy Pack、权限、具体模型 ID 和 Durable Run。Windows KiroCrew 0.11.0-rc.5 实机 E2E 仍待验证。
+
+## 0.3.0 追加修复候选 — Dyna → Tiga 空闲 ACP 会话同步（2026-10-31）
+
+- 修复已有聊天回复结束后 ACP Provider 仍保持 warm，导致切换 Dyna → Tiga 时 `_kiro_byo_reconcile_slot_routing` 将该会话错误视为活跃并保留 Dyna Type 的缺陷；反向 Tiga → Dyna 也使用同一安全路径。
+- 不再只改变聊天右下角的显示字段。跨 Mode 的空闲 ACP 会话经 Crew 原生会话重置事务及锁/忙碌/子代理检查之后，才提交新的 `kiro-byo-type:<mode>:<type>`；后续消息按新 Mode 创建 ACP 会话。
+- 保留同 Mode 手动 Type、具体模型直连、官方后端、运行中的回合、链接会话和其他 App 的会话。重置拒绝或宿主接口不可用时，保留旧选择并记录失败，避免假显示；如用户与模式页之间仍有不一致，可检查 `host_sync` 状态并重新加载会话。
+- 为重复切换、运行中、子代理、重置失败、缺失宿主接口及并发手动固定模型竞争增加独立回归测试。不改变 Tiga/Dyna Policy Pack、Provider 凭据、Durable Run 或原有 Model ID。
+- Linux 分组回归：1249 通过，1 跳过，58 subtest 通过；13 项 Playwright/Chromium 几何测试在当前环境中未完成（单进程运行同样于浏览器测试附近超时），不得计为通过。Windows KiroCrew 实机 UI/真实 ACP 验收仍待完成。
+
+## 0.3.0 修复候选 — Mode 切换同步与架构门禁（2026-10-31）
+
+- 修复冷会话从 Tiga 切换 Dyna 后仍保存旧 Type 的状态协调问题；同 Mode 手动 Type、具体模型固定选择与活跃 ACP 会话不强制迁移，官方后端与 BYO 隔离。
+- BYO 模式 PUT 成功后尝试同步 KiroCrew 冷会话状态，并从 App 广播跨界面模型目录刷新信号。0.11 注入脚本触发正常模型列表读取和宿主窗口重新验证，不强制刷新整页；React Query 缓存端到端仍需 Windows 验收。
+- KiroCrew v0.11.0 正式版可进入受限源码预检候选集合，所有语义源码依赖及前端 DOM 校验继续失败关闭；不宣称 Windows E2E 通过，未来 0.12 不自动允许。
+- 将兼容性检查中的独立导出契约验证提取为单独函数，使超过 100 行的函数从 55 降至 54，不更改架构预算。
+- 142 个测试文件分六组回归：1260 通过、1 跳过、58 subtest 通过；单进程全量运行未获取正常完成结果（环境中断），不能替代 Windows 宿主测试。
+- 保留 0.3.0 的产品版本号，通过 BUILD_INFO 的新运行时内容摘要区分修复构建。
+
+## 0.3.0 — Dyna 三形态发布候选（2026-10-31）
+
+- 将内置 Dyna 正式注册为可执行 Mode，形态显示顺序为 Miracle → Flash → Strong，默认形态仍为 Flash；Tiga 保持系统默认 Mode，直到用户主动切换。
+- 三种 Type 分别引入完整路由、推理、独立复核和有界 Worker 协作策略，共用原有 Provider、ACP、权限、Trace、Durable Run 和安全边界。
+- Kiro BYO 模式页根据实际当前 Mode 动态切换卡片和只读路由统计；消除异步加载旧 Mode 统计的视觉混用。
+- Crew 模型选择基于当前活动 Mode 的有序 Type 列表，保留不变的 `kiro-byo-type:<mode>:<type>` 协议 ID。具体模型直连仍然不走 Type 路由。
+- 内置 Dyna 策略只能随签名/受控发布安装包更新，自定义同名策略不允许覆盖；五语言文案基于既有模型名称和类型名称显示规则。
+- 仍未完成 Windows KiroCrew 0.11.0-rc.5 端到端实机验收，尤其需实测宿主模型菜单刷新和真实多 Agent 效果。
+
+## 0.2.5 — ACP V3 能力契约与 MCP 错误信息安全收口（2026-10-31）
+
+- 新增 `scripts/acp_capability_audit.py`，静态检查 `initialize` 公布的 ACP 扩展与实际分发器是否一致，输出公开与未公开 Crew/旧兼容方法清单；发布检查自动执行该契约审计。不会自动暴露已有私有 API，也不冒充 `session/fork` 已实现。
+- 为 MCP 2026 `input_required` 增加专用异常类别 `McpInputRequired`；保持拒绝未支持的交互输入、保留远端调用可能产生未知副作用的安全状态，不伪造 MCP Elicitation 功能。
+- MCP 已派发调用的异常信息不再把不可信上游原文传入模型/会话 Trace。对协议、JSON-RPC、交互需求、连接故障返回稳定、无敏感数据的错误文本。工具正常返回的业务内容及原有 `isError` 状态仍按原规则处理。
+- 补充安全故障注入、ACP 未声明扩展、未知方法返回 `-32601`、错误文本敏感数据不泄露回归测试；未触碰 Tiga/Dyna Policy Pack、Crew/UI/模型来源和 Durable Run 数据格式。
+- Windows KiroCrew `0.11.0-rc.5` E2E、完整 MCP Elicitation、操作系统 Shell 沙箱均未在本轮实现或宣称通过。
+
+## 0.2.5 — Architecture V7–V10 工具批次、恢复对账与稳定性收尾（2026-10-30）
+
+- V7：工具批次保护停止分支独立为 `_handle_tool_guard_stop`，保留原有 Durable Run 先准入/后收据顺序、Worker handback 与灾难级上限；工具批次主方法从 246 行降至 191 行。
+- V8：ACP Session 恢复时的孤儿 Durable Run 对账拆为 `_reconcile_restored_durable_runs`，保留活跃租约保护、不确定副作用分类、对账竞争处理；恢复主方法从 219 行降至 182 行。
+- V9：新增 AST 依赖边界检查，约束七个路由/内容/执行叶模块禁止反向导入 ACP Server / Turn Runner，并接入发布检查。
+- V10：新增 8 项故障路径、架构与跨系统稳定性检查；136 个测试文件分 16 组，全量回归 1,175 通过、1 跳过、58 个子测试通过。超 200 行 Python 函数预算收紧至 9。
+- 产品 0.2.5、Tiga/Dyna 策略、具体模型直连、Crew 联动、五语言、UI 和 Provider 逻辑不变；仍需 KiroCrew 0.11.0-rc.5 Windows 实机验证。
+
+## 0.2.5 — Architecture V6 Provider 循环终止边界（2026-10-30）
+
+- 从 `turn_runner.py` 抽出 `provider_loop_terminal.py`，统一处理取消前置检查、最终 Provider 错误和内部异常收尾；仅在原有 `RecoveryPolicy` 决策之后执行，不承担重试、回退或工具重放。
+- `_run_provider_tool_loop` 从 284 行降至 200 行，保留 10 条原有 `continue`、4 次逻辑步数回退及 Durable Run 安全边界；原 Provider/内部异常处理语句通过 AST 对比保持一致。
+- 新增六项故障注入/契约测试，覆盖传输重试耗尽、无副作用的模型回退、可见流中断不回退、工具副作用后的内部异常保护、调用前取消和终止处理模块职责边界。
+- 架构预算的超 200 行函数上限从 12 收紧为 11；发布检查新增终止处理模块的集成及 fail-closed 约束。没有更改 Tiga/Dyna 策略、Crew 联动、Provider 模型选择与 UI。
+
+## 0.2.5 — Architecture V5 原生工具调度边界（2026-10-30）
+
+- 将原生工具执行从 Turn Runner 拆到 `native_tool_dispatch.py`，保留原有权限、隔离、执行、审计顺序和 `_execute_native_tool` 对外方法。
+- 拆分一次性目录授权与实际调用，新增 9 项故障注入测试，覆盖审批取消/转向、执行失败撤销授权、重复调用 ID 防重入等关键安全边界。
+- 超过 200 行函数数从 13 降至 12；调整发布检查为实际 Mixin 结构验证。Dyna 保持禁用，Tiga、Crew、Durable Run 及五语言不变。
+- 全量代码回归为 1,161 项通过、1 项跳过、58 个子测试通过；未进行 Windows Crew 0.11.0-rc.5 实机验证。
+
+## 0.2.5 — 形态菜单顶部定位补丁（2026-10-30）
+
+- 当 Crew 复用先前的滚动位置、选中 Multi Type 但形态标题已被裁掉时，重新打开会话模型菜单强制从 Type 组顶部显示；狭小窗口中只做必要补偿。
+- 具体模型继续定位自身（包括长列表最末行），仅对会话模型下拉框生效，不干涉手动滚动及官方 / Mate / Settings 模型选择。
+- 新增旧补丁确实会失败的 Chromium 反例测试，并回归四种形态与新建/复用 Portal。Mode、Type、Provider 路由均未修改。
+
+## 0.2.5 — Crew 0.11 会话模型菜单重新打开时定位选中项（2026-10-30）
+
+- 修复选中列表底部的具体模型后再次打开菜单却从顶部显示的问题：优先按 composer 真实选中标签定位，严格只滚动会话模型菜单的滚动视口，不滚动页面。
+- 兼容 Portal 延迟挂载、隐藏复用、鼠标及键盘打开；手动滚动后不抢走位置，选中顶部 Type 时不会误滚到下方模型。
+- 缩减 BYO 分组标题多占用的行外间距，避免将菜单撑得过长；不覆盖 Crew/Radix 的弹窗定位算法，Windows RC3 实机仍需验收。
+- 保留 Tiga 四形态、Multi 默认、Type wire ID、具体模型的选择回调、官方 Auto 隔离、Mate 和 Settings 语义。
+
+## 0.2.5 — Kiro 风格的单次工具操作描述（2026-10-29）
+
+- 原生工具 Schema 增加可选 `description`：模型可为本次具体操作提供简短说明，按 BYO 界面语言（简体、繁体、英语、日语、韩语）请求生成；旧工具调用无需提供该字段。
+- ACP `tool_call.title` 优先采用经长度、控制字符、命令形态与常见凭据筛选的操作说明；缺失或不合适则回退已有五语言工具类型标题。模型描述是非可信的展示提示，绝不参与授权、执行或审计身份。
+- 工具事件继续保留原始 `rawInput`、`kind`、`toolCallId`、`_meta.kiro`，不改变原始命令、文件路径与已有权限路径；MCP 工具仍保持自有标题与真实身份，不挪用其参数中的同名字段。
+- 原生工具 Schema 的展示语言按会话隔离，防止中日英等并发会话互相污染；新增 5 语言、合法与恶意描述、旧调用兼容、工具执行等回归测试。
+- 尚未在 Windows Crew RC3 观察其是否最终采用 `title` 或 `rawInput.description`，需要实机验收；`auto` 模式仍按系统语言回退。
+
+## 0.2.5 — ACP 工具标题五语言本地化（2026-10-29）
+
+- ACP `tool_call.title` 采用 BYO 的界面语言（简体中文、繁體中文、English、日本語、한국어），工具名、命令参数、权限判定和 `_meta.kiro` 身份保持不变。
+- Shell 默认显示中立的“执行终端命令”一类标题，不把不可信的原始命令猜成安全操作；未知工具保留原名，避免误导。
+- BYO 界面语言选“自动”时，ACP 子进程只能按系统语言回退；尚无官方 Crew 实时前端语言字段可供获取，不能保证跟随 Crew 单独修改的语言设置。
+- 补充五语言、MCP 身份、失败回退、Mode/Type 兼容测试；Crew 活动面板若选择呈现 rawInput 而非 title，仍需实际前端结构确认。
+
+## 0.2.5 — Crew 0.11 模型菜单分组标题恢复（2026-10-29）
+
+- 当新版 Crew 在挂载时已显示 `Sky Type` / `Multi Type` 等名称时，通过 `data-model-id` 识别 Type 行，恢复「形态 · 默认复合型，可手动切换」分组标题。
+- 补充延迟挂载 DOM 回归测试，保持默认 Multi、原生 Settings 作用域及模型 wire ID 不变；无 Type / Model 语义改动。
+
+## 0.2.5 — 第六阶段：MCP 调用状态与异常闭环（2026-10-29）
+
+- MCP Manager 新增 `call_with_status()` 结构化响应，按协议 `isError` 而非 `Error:` 文本判断失败；旧版 `call() -> str` 保持可用。正常的 `Error:` 文本不会被误标为执行失败。
+- 工具派发阶段统一捕获非致命异常（包括非 `OSError`），不暴露异常细节，写入 `failed` 终态与副作用不确定事件，禁止自动重试；`KeyboardInterrupt` / `SystemExit` 不被吞掉。
+- 调用前不可执行的 MCP 状态与已发起远端调用但失败的状态分离：前者不虚报远端副作用不确定，后者保守提示核查外部状态。
+- 尊重已有会话级 `call` 覆盖/测试桩；兼容传统只返回字符串的客户端，但不能从字符串获得可靠的协议错误标志。
+- 新增结构化结果/异常回归测试；未修改 Tiga Mode / Type / 模型池、Crew 21 个源码适配点、Cron 原生读写与 ACP 主路由。
+- 仍需 RC3 Windows 实机 Mate/Worker 验收；Crew 原生 Cron 与 BYO 之间的原子 CAS 仍未解决。
+
+## 0.2.5 — Crew 0.11 RC2+ 受限候选预检（2026-10-29）
+
+- 修复 `0.11.0-rc.3` 在源码预检前就被 `resolve_target()` 与适配器元数据的 RC1/RC2 白名单拦截的问题。RC2 及之后同一 0.11.0 系列的 RC 都可进入只读预检，稳定版及其他系列仍拒绝。
+- 对所有新 RC **继续强制**验证 21 个语义注入点、overlay 未修改依赖的符号/导出/标记，以及实际安装的前端模型菜单 DOM 契约；任意不匹配均不得写入 Crew。
+- 更新只读预检脚本、发布检查、RC 候选回归测试和构建元数据；RC1 仍是唯一源码审查基线，RC3 未获 Windows E2E 验证。
+- `mode_router.py`、`protocol.py`、Tiga 策略、ACP 引擎、Mate/Worker 路由守卫、原生任务同步与前端显示代码均未改动。
+
+## 0.2.5 — Crew 0.11.0-rc.2 预检式兼容支持（2026-10-29）
+
+- RC2 不再因为 `resolve_target()` 的 RC1 版本硬编码直接失败；`0.11.0-rc.2` / `0.11.0rc2` 被列为**候选**（非已验收版本），RC1 仍为已检查的基线。
+- 接入仍需全部 21 个 Crew Python 语义适配点、未修改模块的依赖契约及已安装 0.11 前端的模型菜单 DOM 契约均通过。任何一处缺失、变化或不收敛均拒绝安装，不回退到官方后端。
+- RC2 继续使用 Crew 0.11 专属形态标签显示桥接，避免回退旧版前端补丁。新增只读预检脚本 RC2 支持与专门测试。
+- 不修改 Tiga 四形态、Mode/Type 命名空间、Provider 路由、ACP 执行器及 Crew 原生设置双向同步行为。
+- **限制：尚无 RC2 真实上游源码及 Windows E2E 验收；此构建并不保证当前用户的 RC2 源码一定通过契约检查。** 若检查失败须依据报告修复对应源码接口，不允许绕过安全检查。
+
+## 0.2.5 — 第四阶段：Crew 0.11 RC1 成员后端补丁完整性防护（2026-10-29，构建更新）
+
+- Stage 5: isolate Crew-governed MCP tool dispatch into a dedicated mixin without changing the TurnRunner entrypoint, Mode/Type policies or existing approval order; treat post-dispatch MCP transport exceptions as uncertain effects without auto-retry. See `CODE_REVIEW_FIX_STAGE5_2026-10-29.md`.
+
+- 已安装的 BYO 成员会话路由守卫不能只凭注释 marker 视为有效：现在逐行核对完整的 fail-closed 守卫块，缺失/篡改立即抛出 PatchError，阻止静默回退官方后端。
+- Crew 0.11 RC1 的 loader 成员默认后端守卫也不再只凭 marker 判断；必须保持完整 BYO 主后端接管逻辑，否则安装事务拒绝继续。
+- 新增 `tests/test_crew11_guard_integrity_stage4.py` 共 8 项回归测试，覆盖已安装幂等、损坏/重复 marker、失效后端判定；验证 legacy 成员升级路径不受影响。
+- 未修改 Mode/Type、四种 Tiga 形态、Provider 模型路由、ACP 执行器及 RC1 harness overlay。无 Windows E2E 验收，不将此项等同 Mate/Worker 真实执行链验证。
+- 保留已知限制：Crew 原生 Cron 与 BYO 编辑器尚无跨界面原子 CAS。
+
+## 0.2.5 — 第三阶段：Crew 原生 Cron 写入后校验（2026-10-29，构建更新）
+
+- BYO 日程模型和 AI 执行上下文提交后，重新从 Crew 原生 Cron 服务读取任务并核对实际存储值，不再将 `update_job_async` 返回对象直接当作持久化成功证据；任务消失、存储值不一致时明确报错。
+- 如果异步日程写入期间 Crew 主后端从 BYO 切走，拒绝将该请求报告为成功，并明确告知该写入可能已发生，应检查 Crew 原生任务；**不做危险的自动回滚**。
+- 服务端拒绝对 Script/Command 日程修改 AI 会话上下文，与 BYO 任务 UI 的隐藏逻辑一致。
+- 新增 6 项异常路径回归测试，继续保护原有的 `expected_model`、执行上下文过期检查和同 Gateway 串行提交。
+- 完全不改动 Mode/Type、Tiga 四形态、具体模型直连、ACP 执行器、Crew 0.11 RC1 适配器、Mate/Worker 投影和 UI 文件。
+- **仍未实现 Crew 原生编辑器与 BYO 之间的原子 Cron CAS**；读回验证是后置完整性检查，不是防止跨界面并发覆盖的替代品。Windows E2E / 真实 Provider 调用仍未验收。
+
+## 0.2.5 — 第一阶段代码审查修复（2026-10-28，构建更新）
+
+- 在 Crew 原生配置锁内复核主代理后端：聊天、Crew 队友 / Worker 和后台模型写入在后端已切回官方时拒绝提交；`config.local.json` 对主后端的覆盖会使 BYO 写入失败关闭，防止配置检查与实际写入之间的竞态。
+- 在没有 BYO 可执行具体模型时，不再将启用 Mode 的 Type 列入任务页模型选项或写入白名单；与 Crew 主模型目录的可用性条件保持一致。
+- 同一个 Gateway 事件循环内对 BYO 的 Cron 模型写入和执行上下文更新串行处理，旧页面使用 `expected_model` 的冲突检查不会被另一个 BYO 任务请求绕过。**仍未实现与 Crew 原生独立 Cron 写入者之间的原子 CAS**；需要官方 Cron 接口或同一存储事务支持，不能宣称该项完全解决。
+- 修正无法读取 `VERSION` 时回退到过期版本号的问题；修正 RC1 Worker Kit 适配文档的过期描述。
+- 新增针对并发后端切换、`config.local.json`、无 Provider 以及两个 BYO Cron 并发编辑的回归用例。全项目 pytest：1006 passed, 1 skipped, 52 subtests passed（本地隔离执行；Windows KiroCrew 真实运行仍未验收）。
+
+## 0.2.5 — BYO 模型目录隔离修复（2026-10-28，构建更新）
+
+- BYO 任务页的日程与后台模型下拉框只列出当前 BYO 模型目录里的 Type/具体模型，以及 Crew 原生“继承”或“Auto”配置项；历史官方或未知模型只作为只读告警显示，不能被再次选入 BYO。
+- 主后端为官方时，BYO 任务页仅显示 Crew 当前原生模型值，不呈现可操作的 BYO 模型选择器；保留之前的不可写保护。
+- Crew 原生模型发现的 BYO 适配不再将宿主的 `configured_default`（可能是旧官方模型）加入 BYO 模型目录。已成功读到空 Provider 目录时，也不再从旧 ACP 广告缓存复活过期模型。
+- 保留原生 Cron 与 `agent.role_models.background` 的读写及 `expected_model` 冲突校验；保留之前的 Mate/Worker 执行路由保护。
+- 对已有 0.2.5 安装中**已知的、未修改的旧 BYO 模型目录 helper**提供可验证的热升级兼容，未知第三方修改仍拒绝覆盖。
+- 新增六项回归测试（其中 UI 测试实际执行组件逻辑、旧版 helper 使用语义升级模拟）；未进行 Windows KiroCrew RC1 实机端到端验收，官方计费亦未验证。
+
 ## 0.2.5 — Crew 0.11 RC1 Task Console unified patch (build-specific)
 
 - One-page Tasks console now displays native Crew scheduled jobs and the background role only. Chat and crew-mate models remain in Crew's native UI; no duplicate global Harness switcher.
@@ -804,3 +1020,8 @@
 - 单独识别有会话身份的 Crew member dispatch/panel MCP：缺省/空 Saved Agent `tools` 不再意外屏蔽 Crew 的会话级控制面，同时坚持 excludedTools、真实连接、权限请求和派发前复核。
 - 同名 MCP 服务声明拒绝；Crew member 服务缓存不再被当作真实连接验证；无完整 Agent 投影但有 member mount 时默认收紧原生及外部 MCP 可见性。
 - 不增加完整 Saved Agent 能力声明、不改 Tiga/Dyna/Provider 策略和 Crew 数据库；Windows 真实集成验收仍待完成。
+
+### 0.3.0 V12 client-latency observer candidate (2026-10-31)
+- Add a separate conservative client-observed send-to-reply timing readout for the Crew 0.11 chat; do not overwrite server Turn or Provider telemetry.
+- Fail closed when a live turn cannot be uniquely associated with the visible chat, and preserve existing host install/change isolation.
+- Keep Windows/macOS/Linux Electron UI verification pending; this is not a claim of pixel-perfect end-to-end timing.

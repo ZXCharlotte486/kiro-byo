@@ -55,10 +55,11 @@ def test_history_pruning_keeps_pending_failed_and_cancelled_runs(tmp_path: Path)
     assert len(store.list(limit=100)) <= 17  # pruning occurs during create
     # With only protected runs, exceeding the nominal cap is safer than deletion.
     store.clear()
+    assert all(store.get(run_id) is not None for run_id in protected_ids)
     for i in range(19):
         record = store.create_run(f"active-{i}")
         protected_ids.append(record["run_id"])
-    assert len(store.pending()) == 19
+    assert len(store.pending()) == 20  # original running run remains protected
 
 
 def test_critical_checkpoint_requires_run_and_existing_ledger(tmp_path: Path) -> None:

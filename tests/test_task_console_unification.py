@@ -118,3 +118,117 @@ def test_explicit_background_role_is_tracked_with_pinned_concrete_model():
     assert len(report["recent"]) == 1
     assert report["latest"]["served_model"] == "pinned"
     assert report["latest"]["upstream_verified"] is True
+
+
+def test_locked_crew_mutations_refuse_switch_to_official(live_linkage_routes, monkeypatch):
+    """The main backend may change after BYO preflight but before locking."""
+    import sys
+    from kiro_crew.config import loader
+
+    host = live_linkage_routes
+    host.document['agents'] = {
+        'Gridman': {'member_id': 'a', 'model': '', 'worker_model': ''},
+    }
+    before_background = host.document['agent']['role_models']['background']
+    actual_update = loader.update_config_locked
+
+    def change_harness_before_lock(path, *, mutate):
+        host.document['agent']['acp_backend'] = 'kas'
+        return actual_update(path, mutate=mutate)
+
+    monkeypatch.setattr(loader, 'update_config_locked', change_harness_before_lock)
+    for handler, payload in (
+        (host.routes.update_chat_model, {'model': 'byo-model'}),
+        (host.routes.update_member_model, {'model': 'byo-model', 'field': 'model'}),
+        (host.routes.update_background_model, {'model': 'byo-model', 'expected_model': 'auto'}),
+    ):
+        host.document['agent']['acp_backend'] = 'kiro-byo'
+        code, body = _body(asyncio.run(handler(host.request(payload), None)))
+        assert code == 400, (handler.__name__, body)
+        assert 'changed' in body['error']
+        assert host.document['agent']['acp_backend'] == 'kas'
+        assert host.document['agent']['model'] == 'chat-model'
+        assert host.document['agents']['Gridman']['model'] == ''
+        assert host.document['agent']['role_models']['background'] == before_background
+
+
+def test_local_harness_override_rejected_even_if_base_is_byo(live_linkage_routes, tmp_path):
+    host = live_linkage_routes
+    # A higher-priority override makes the base config's main backend unsafe
+    # to rely on, even if the synthetic preflight returns BYO.
+    (tmp_path / 'config.local.json').write_text(
+        json.dumps({'agent': {'acp_backend': 'kas'}}), encoding='utf-8'
+    )
+    code, body = _body(asyncio.run(host.routes.update_background_model(
+        host.request({'model': 'byo-model'}), None
+    )))
+    assert code == 400
+    assert 'config.local.json' in body['error']
+    assert host.document['agent']['role_models']['background'] == 'auto'
+
+
+def test_no_provider_hides_unrunnable_mode_type_in_tasks(live_linkage_routes, monkeypatch):
+    from types import SimpleNamespace
+
+    host = live_linkage_routes
+    policy = SimpleNamespace(id='multi', display_name='Multi Type')
+    pack = SimpleNamespace(display_name='Tiga', policies=[policy])
+    plugin = SimpleNamespace(id='tiga', enabled=True, pack=pack)
+    registry = SimpleNamespace(get=lambda name: plugin if name == 'tiga' else None)
+    monkeypatch.setattr(host.routes, 'load_mode_registry', lambda: registry)
+    empty = SimpleNamespace(mode_pack='tiga', public_models=[])
+    monkeypatch.setattr(host.routes, 'load_config', lambda store: empty)
+    assert host.routes._selection_rows(empty) == []
+    assert host.routes._selection_ids(empty) == set()
+    request = host.request({'model': 'kiro-byo-type:tiga:multi'})
+    code, data = _body(asyncio.run(host.routes.update_background_model(request, None)))
+    assert code == 400
+    assert 'unknown' in data['error']
+
+    # Once one concrete model becomes available, its Mode Types reappear.
+    ready = SimpleNamespace(
+        mode_pack='tiga', public_models=[('p/model', SimpleNamespace(name='M'))]
+    )
+    assert [row['kind'] for row in host.routes._selection_rows(ready)] == ['type', 'concrete']
+
+
+def test_concurrent_byo_cron_edits_reject_second_stale_writer(live_linkage_routes, monkeypatch):
+    from types import SimpleNamespace
+
+    host = live_linkage_routes
+    monkeypatch.setattr(host.routes, '_selection_ids', lambda _config: {'model-a', 'model-b'})
+    current = {'model': ''}
+    first_in_write = asyncio.Event()
+    release_first = asyncio.Event()
+
+    async def jobs(**kwargs):
+        return [SimpleNamespace(id='example', model=current['model'], script='', command='')]
+
+    async def update(job_id, *, model):
+        if model == 'model-a':
+            first_in_write.set()
+            await release_first.wait()
+        current['model'] = model
+        return SimpleNamespace(id=job_id, model=model)
+
+    request_a = host.request({'model': 'model-a', 'expected_model': ''})
+    request_b = host.request({'model': 'model-b', 'expected_model': ''})
+    for request in (request_a, request_b):
+        request.app['state'].crons.list_jobs_async = jobs
+        request.app['state'].crons.update_job_async = update
+
+    async def scenario():
+        first = asyncio.create_task(host.routes.update_task_model(request_a, None))
+        await first_in_write.wait()
+        second = asyncio.create_task(host.routes.update_task_model(request_b, None))
+        await asyncio.sleep(0)
+        release_first.set()
+        return await asyncio.gather(first, second)
+
+    first, second = asyncio.run(asyncio.wait_for(scenario(), timeout=5))
+    code_a, _ = _body(first)
+    code_b, data_b = _body(second)
+    assert code_a == 200
+    assert code_b == 400
+    assert 'changed' in data_b['error']
+    assert current['model'] == 'model-a'

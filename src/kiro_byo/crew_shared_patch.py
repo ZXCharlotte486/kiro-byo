@@ -421,8 +421,6 @@ def _patch_members(text: str) -> str:
     # is BYO; Crew retains its original persisted member preferences, which
     # become active again when the main harness returns to official.
     guard_marker = "# Kiro BYO: enforce BYO for new member sessions (no official fallback)"
-    if guard_marker in text:
-        return text
     insert_at = selector.body[0].lineno - 1
     first = selector.body[0]
     if (isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant)
@@ -449,6 +447,15 @@ def _patch_members(text: str) -> str:
         indent + '        raise RuntimeError("Kiro BYO member backend is unavailable; official fallback refused")',
         indent + '    return "kiro-byo"',
     ])
+    # Never use the ownership marker alone as proof that a previously patched
+    # selector still enforces the fail-closed route. A partially overwritten
+    # install may retain the comment while losing the backend check or return.
+    # Require the complete BYO-owned guard as one contiguous, exact block.
+    if guard_marker in text:
+        owned_block = "\n".join(guard)
+        if text.count(guard_marker) != 1 or text.count(owned_block) != 1:
+            raise PatchError("Crew BYO member dispatch guard is incomplete or modified")
+        return text
     # The previous BYO patch had only the marker. Replace that exact line
     # in-place; do not stack guards on every upgrade. If the source is pristine,
     # insert the guard after the docstring just as the old marker was inserted.

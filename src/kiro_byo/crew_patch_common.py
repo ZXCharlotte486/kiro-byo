@@ -630,7 +630,10 @@ _KIRO_BYO_MODEL_HELPER = r'''async def _kiro_byo_models(request: web.Request, co
     # ACP is the runtime fallback.  Prefer local active-pack metadata for Type
     # labels, but accept runtime-advertised Type sentinels when that metadata is
     # unavailable.  Concrete advertised-model persistence remains concrete-only.
-    if not model_rows or not type_rows:
+    # ACP advertisement is a recovery path ONLY if reading BYO's catalogue
+    # failed.  A successfully read empty provider list is authoritative; old
+    # session advertisements must not resurrect models after a provider removal.
+    if _catalog_error:
         namespace = model_registry_namespace(ACP_BACKEND_KIRO_BYO)
         advertised = _advertised_cc_models(request, namespace)
         if not advertised:
@@ -678,16 +681,9 @@ _KIRO_BYO_MODEL_HELPER = r'''async def _kiro_byo_models(request: web.Request, co
     if model_rows:
         return type_rows + model_rows
 
-    default = (configured_default or "").strip()
-    if default and _normalize_model_key(default) != "auto" and not default.startswith("kiro-byo-type:"):
-        return [
-            {
-                "model_name": default,
-                "display_name": default,
-                "description": "Configured default",
-                "context_window": model_registry.model_window(default) or 0,
-            }
-        ]
+    # configured_default belongs to the Crew host config, not necessarily
+    # to the active BYO Provider catalogue.  Never launder a stale KAS/CLI
+    # model pin back into the selectable BYO model list.
     # A genuine fresh install with no providers can legitimately have an empty
     # catalogue. A broken catalogue or configured-but-empty provider must NOT
     # look healthy (HTTP 200 []) to the Crew agent/model editors.
@@ -827,6 +823,38 @@ def _replace_owned_top_function(text: str, name: str, snippet: str) -> str:
     return _replace_lines(text, _Span(node.lineno - 1, node.end_lineno), snippet.rstrip("\r\n"))
 
 
+def _patch_models_backend_reconcile(text: str) -> str:
+    """Reconcile native and BYO catalog reads, not just BYO-specific ones."""
+    marker = "# Kiro BYO: reconcile idle sessions on every backend catalogue read."
+    tree = _parse(text)
+    matches = [node for node in tree.body if isinstance(node, ast.AsyncFunctionDef)
+               and node.name == "api_models"]
+    if len(matches) != 1:
+        raise PatchError("Crew api_models entry moved or duplicated")
+    fn = matches[0]
+    if marker in text:
+        if marker not in "".join(text.splitlines(keepends=True)[fn.lineno - 1:fn.end_lineno]):
+            raise PatchError("Kiro BYO model reconciliation marker outside api_models")
+        return text
+    first = fn.body[0]
+    after = (first.end_lineno if isinstance(first, ast.Expr) and
+             isinstance(first.value, ast.Constant) and isinstance(first.value.value, str)
+             else fn.lineno)
+    snippet = (
+        "    # Kiro BYO: reconcile idle sessions on every backend catalogue read.\n"
+        "    try:\n"
+        "        _byo_state = request.app.get('state')\n"
+        "        if _byo_state is not None:\n"
+        "            from kiro_crew.dashboard import chat_handlers as _byo_chat\n"
+        "            _byo_reconcile = getattr(_byo_chat, '_kiro_byo_reconcile_slot_routing', None)\n"
+        "            if callable(_byo_reconcile):\n"
+        "                await _byo_reconcile(_byo_state)\n"
+        "    except Exception:\n"
+        "        logger.debug('Kiro BYO backend slot sync unavailable', exc_info=True)\n"
+    )
+    return _insert_after_line(text, after, snippet)
+
+
 def _patch_agents(text: str) -> str:
     text = _add_import_name(text, "kiro_crew.acp_backends", "ACP_BACKEND_KIRO_BYO")
 
@@ -882,6 +910,7 @@ def _patch_agents(text: str) -> str:
             )
         )
     text = _patch_agents_resolved_model(text)
+    text = _patch_models_backend_reconcile(text)
     if "if backend == ACP_BACKEND_KIRO_BYO:" in text:
         return text
 

@@ -27,7 +27,7 @@ def test_existing_management_views_and_safe_lazy_loading_remain():
         assert f'function {view}(' in ui
         assert f'body=h({view}' in ui
     assert 'Promise.allSettled([loadStatus(),loadPresets(),loadOps()])' in ui
-    assert "if(tab==='records')Promise.allSettled([loadOps(),loadTrace()])" in ui
+    assert "if(tab==='records')Promise.allSettled([loadOps(),loadTrace(),loadRecords()])" in ui
     # Backend diagnostics remain possible without an unsafe second grant mechanism.
     routes = (ROOT/'backend/routes.py').read_text(encoding='utf-8')
     assert '/tool-center' not in routes  # never existed in Crew App routes

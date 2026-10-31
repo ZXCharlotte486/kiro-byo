@@ -18,8 +18,8 @@ from types import SimpleNamespace
 from typing import Any
 
 RUN_LEASE_HEARTBEAT_SECONDS = 20.0
-
-from .policy_packs import runtime_policy_context_for_request
+from .routing_events import selected_route_event_data
+from .crew_turn_context import extend_crew_context, crew_artifact_tool_names_for_turn
 from .agent_runtime import AgentResult, AgentRuntime, AgentTask, AgentTaskBusyError, ExecutionPlan
 from .durable_runs import AgentStateStore, DurableRunStore
 from .capability_seams import (
@@ -32,18 +32,19 @@ from .capability_seams import (
     RuntimeSeams,
 )
 from .config import ConfigError
-from .errors import ClientRequestError
 from .execution_guard import ExecutionGuard
 from .mcp_client import DEFERRED_TOOL_ACTIVE_LIMIT, DEFERRED_TOOL_SEARCH_NAME
-from .native_tools import NativeInvocation, NativeToolError, NativeToolRuntime, PermissionDecision, ToolValidationError
+from .mcp_tool_dispatch import McpToolDispatchMixin
+from .native_tool_dispatch import NativeToolDispatchMixin
+from .provider_loop_terminal import ProviderLoopTerminalMixin
+from .prompt_routing import PromptRoutingMixin
+from .native_tools import NativeToolRuntime
 from .acp_worker import AcpAgentCatalog, run_acp_agent_task
 from .workspace_manager import WorkspaceError, WorkspaceManager
 from .protocol import MODEL_ECHO, MODEL_UPPER
 from .mode_router import (
     ReviewTarget,
-    build_execution_plan,
     build_signals,
-    infer_tools_required,
     model_in_tier,
 )
 from .providers import ProviderError, ProviderInterrupted, ProviderTransportError, chat_completion_turn
@@ -62,7 +63,6 @@ from .session_events import (
     clear_messages,
     clear_route_pin,
     revise_last_assistant,
-    set_route_pin,
     truncate_messages,
 )
 from .telemetry import TurnTelemetry, now_timestamp
@@ -218,7 +218,7 @@ class DurableCheckpointError(RuntimeError):
     crash cannot leave an unclassifiable unknown_side_effect."""
 
 
-class TurnRunnerMixin:
+class TurnRunnerMixin(PromptRoutingMixin, NativeToolDispatchMixin, McpToolDispatchMixin, ProviderLoopTerminalMixin):
     def _runtime_seams(self) -> RuntimeSeams:
         """Return the narrow capabilities consumed by the Turn Engine.
 
@@ -1040,7 +1040,13 @@ class TurnRunnerMixin:
         if session.native is not None:
             available = {spec.name for spec in session.native.specs()}
             visible = TurnRunnerMixin._native_visible_to_agent(session, available)
-            tools.extend(session.native.tool_specs(visible))
+            if isinstance(session.native, NativeToolRuntime):
+                tools.extend(session.native.tool_specs(
+                    visible, ui_language=str(getattr(session, "ui_language_preference", "auto") or "auto")
+                ))
+            else:
+                # Preserve alternate native runtime bridges used by Crew/tests.
+                tools.extend(session.native.tool_specs(visible))
         if session.mcp is not None and session.mcp.servers and (session.agent.allows_any_mcp() or
                 (hasattr(session.mcp, "has_crew_member_mount") and session.mcp.has_crew_member_mount())):
             visible_loaded = [
@@ -1060,7 +1066,7 @@ class TurnRunnerMixin:
             skill_names = session.mcp.crew_skill_tool_names(
                 allowed=lambda binding: TurnRunnerMixin._mcp_visible_to_agent(session, binding)
             ) if hasattr(session.mcp, "crew_skill_tool_names") else ()
-            visible_loaded = list(dict.fromkeys([*visible_loaded, *browser_names, *skill_names]))
+            visible_loaded = list(dict.fromkeys([*visible_loaded, *browser_names, *skill_names, *crew_artifact_tool_names_for_turn(session, TurnRunnerMixin._mcp_visible_to_agent)]))
             # Older external tool bridges implement tool_specs(names) without
             # the new verification flag. Only our own manager owns that flag;
             # do not break ACP compatibility tests or alternate bridges.
@@ -1146,458 +1152,6 @@ class TurnRunnerMixin:
             content={"arguments": arguments, "result": result_text},
         )
         return result_text, waited_ms, newly_loaded
-
-    def _execute_native_tool(
-        self, session: Any, call: Any, arguments: dict[str, Any]
-    ) -> tuple[str, float, str]:
-        self._runtime_event(
-            "tool.call.started",
-            session,
-            data={"kind": "native", "call_id": call.call_id, "tool": call.name},
-            content={"arguments": arguments},
-        )
-        invocation: NativeInvocation | None = None
-        try:
-            invocation = session.native.validate(call.name, arguments)
-        except ToolValidationError as exc:
-            result_text = f"Error: invalid {call.name} arguments: {exc}"
-            self._emit_tool_call(session, call.call_id, call.name, arguments)
-            self._emit_tool_status(session, call.call_id, status="failed", text=result_text)
-            session.native.audit.record(
-                session_id=session.session_id,
-                call_id=call.call_id,
-                tool=call.name,
-                capability=session.native.capability_for(call.name),
-                permission="not_requested",
-                outcome="validation_failed",
-                exit_code=None,
-                detail=str(exc),
-            )
-            return result_text, 0.0, ""
-
-        # The model can emit a stale or invented function call even when that
-        # function was NOT in the current Saved Agent's advertised tool list.
-        # Visibility is an execution constraint, not merely UI/model guidance.
-        # This check must precede permission prompts and filesystem scope grants.
-        available_native = {spec.name for spec in session.native.specs()}
-        if invocation.spec.name not in self._native_visible_to_agent(session, available_native):
-            result_text = "Permission denied: native tool is not visible to this Crew Saved Agent."
-            self._emit_tool_call(session, call.call_id, invocation.spec.name, invocation.arguments)
-            self._emit_tool_status(session, call.call_id, status="refused", text=result_text)
-            session.native.audit.record(
-                session_id=session.session_id,
-                call_id=call.call_id,
-                tool=invocation.spec.name,
-                capability=invocation.spec.capability,
-                permission="agent_tool_visibility",
-                outcome="refused",
-                exit_code=None,
-            )
-            return result_text, 0.0, ""
-
-        decision = session.native.permission_engine.evaluate(invocation)
-        if decision is PermissionDecision.DENY:
-            result_text = (
-                f"Permission denied by the Kiro BYO native policy for {invocation.spec.name}."
-            )
-            self._emit_tool_call(session, call.call_id, invocation.spec.name, invocation.arguments)
-            self._emit_tool_status(session, call.call_id, status="refused", text=result_text)
-            session.native.audit.record(
-                session_id=session.session_id,
-                call_id=call.call_id,
-                tool=invocation.spec.name,
-                capability=invocation.spec.capability,
-                permission="local_deny",
-                outcome="refused",
-                exit_code=None,
-            )
-            return result_text, 0.0, ""
-
-        # Filesystem targets outside cwd/additionalDirectories are not an
-        # automatic hard failure. Ask Crew/the user for that exact tool call,
-        # then grant only the narrow directory roots needed by the invocation.
-        # ``allow_once`` is revoked immediately after execution; ``allow_always``
-        # lives only in this NativeToolRuntime/session and is never persisted.
-        try:
-            scope_roots = session.native.required_scope_roots(invocation)
-        except (SandboxError, NativeToolError, OSError) as exc:
-            result_text = f"Error: {exc}"
-            self._emit_tool_call(session, call.call_id, invocation.spec.name, invocation.arguments)
-            self._emit_tool_status(session, call.call_id, status="failed", text=result_text)
-            session.native.audit.record(
-                session_id=session.session_id,
-                call_id=call.call_id,
-                tool=invocation.spec.name,
-                capability=invocation.spec.capability,
-                permission="not_requested",
-                outcome="scope_resolution_failed",
-                exit_code=None,
-                detail=str(exc),
-            )
-            return result_text, 0.0, ""
-
-        permission_choice = ""
-        added_scope_roots: tuple[Any, ...] = ()
-        permission_already_requested = False
-        if scope_roots:
-            try:
-                permission_choice = self._request_tool_permission_choice(
-                    session, call.call_id, invocation.spec.name, invocation.arguments
-                )
-                permission_already_requested = True
-            except ClientRequestError as exc:
-                interruption = self._tool_interrupt_reason(session)
-                if interruption == "cancelled":
-                    return "", 0.0, "cancelled"
-                if interruption == "steered":
-                    result_text = "Interrupted before execution: user steering changed the task."
-                    self._emit_tool_status(
-                        session, call.call_id, status="failed", text=result_text
-                    )
-                    session.native.audit.record(
-                        session_id=session.session_id,
-                        call_id=call.call_id,
-                        tool=invocation.spec.name,
-                        capability=invocation.spec.capability,
-                        permission="interrupted",
-                        outcome="steered",
-                        exit_code=130,
-                        detail="directory permission wait interrupted by user steering",
-                    )
-                    return result_text, 0.0, "steered"
-                self.trace(
-                    f"native directory permission request failed session={session.session_id} "
-                    f"tool={invocation.spec.name}: {exc}"
-                )
-                permission_choice = ""
-
-            if not permission_choice:
-                result_text = "Permission denied by the Kiro Crew host."
-                self._emit_tool_status(session, call.call_id, status="refused", text=result_text)
-                session.native.audit.record(
-                    session_id=session.session_id,
-                    call_id=call.call_id,
-                    tool=invocation.spec.name,
-                    capability=invocation.spec.capability,
-                    permission="scope_denied",
-                    outcome="refused",
-                    exit_code=None,
-                    touched_paths=tuple(str(root) for root in scope_roots),
-                )
-                return result_text, 0.0, ""
-
-            pre_dispatch_message, interrupted = self._pre_dispatch_tool_interrupt(
-                session, call.call_id, invocation.spec.name, kind="native"
-            )
-            if interrupted:
-                return pre_dispatch_message, 0.0, interrupted
-            try:
-                added_scope_roots = session.native.grant_scope_roots(scope_roots)
-            except (SandboxError, NativeToolError, OSError) as exc:
-                result_text = f"Error: approved directory scope could not be applied: {exc}"
-                self._emit_tool_status(session, call.call_id, status="failed", text=result_text)
-                session.native.audit.record(
-                    session_id=session.session_id,
-                    call_id=call.call_id,
-                    tool=invocation.spec.name,
-                    capability=invocation.spec.capability,
-                    permission=permission_choice,
-                    outcome="scope_grant_failed",
-                    exit_code=None,
-                    detail=str(exc),
-                )
-                return result_text, 0.0, ""
-
-        try:
-            session.native.preflight(invocation)
-        except (SandboxError, NativeToolError, OSError) as exc:
-            if permission_choice == "allow_once" and added_scope_roots:
-                session.native.revoke_scope_roots(added_scope_roots)
-            result_text = f"Error: {exc}"
-            if not permission_already_requested:
-                self._emit_tool_call(session, call.call_id, invocation.spec.name, invocation.arguments)
-            self._emit_tool_status(session, call.call_id, status="failed", text=result_text)
-            session.native.audit.record(
-                session_id=session.session_id,
-                call_id=call.call_id,
-                tool=invocation.spec.name,
-                capability=invocation.spec.capability,
-                permission=permission_choice or "not_requested",
-                outcome="preflight_failed",
-                exit_code=None,
-                detail=str(exc),
-            )
-            return result_text, 0.0, ""
-
-        auto_approved = session.agent.auto_approves_native(invocation.spec.name)
-        if permission_already_requested:
-            allowed = True
-        elif auto_approved:
-            # ``allowedTools`` skips ordinary per-call prompting, but it never
-            # silently widens filesystem roots. Out-of-scope access took the
-            # explicit directory permission path above.
-            self._emit_tool_call(session, call.call_id, invocation.spec.name, invocation.arguments)
-            allowed = True
-        else:
-            try:
-                allowed = self._request_tool_permission(
-                    session, call.call_id, invocation.spec.name, invocation.arguments
-                )
-            except ClientRequestError as exc:
-                interruption = self._tool_interrupt_reason(session)
-                if interruption == "cancelled":
-                    return "", 0.0, "cancelled"
-                if interruption == "steered":
-                    result_text = "Interrupted before execution: user steering changed the task."
-                    self._emit_tool_status(
-                        session, call.call_id, status="failed", text=result_text
-                    )
-                    session.native.audit.record(
-                        session_id=session.session_id,
-                        call_id=call.call_id,
-                        tool=invocation.spec.name,
-                        capability=invocation.spec.capability,
-                        permission="interrupted",
-                        outcome="steered",
-                        exit_code=130,
-                        detail="permission wait interrupted by user steering",
-                    )
-                    return result_text, 0.0, "steered"
-                allowed = False
-                self.trace(
-                    f"native permission request failed session={session.session_id} "
-                    f"tool={invocation.spec.name}: {exc}"
-                )
-        if not allowed:
-            if permission_choice == "allow_once" and added_scope_roots:
-                session.native.revoke_scope_roots(added_scope_roots)
-            result_text = "Permission denied by the Kiro Crew host."
-            self._emit_tool_status(session, call.call_id, status="refused", text=result_text)
-            session.native.audit.record(
-                session_id=session.session_id,
-                call_id=call.call_id,
-                tool=invocation.spec.name,
-                capability=invocation.spec.capability,
-                permission="denied",
-                outcome="refused",
-                exit_code=None,
-            )
-            return result_text, 0.0, ""
-
-        pre_dispatch_message, interrupted = self._pre_dispatch_tool_interrupt(
-            session, call.call_id, invocation.spec.name, kind="native"
-        )
-        if interrupted:
-            if permission_choice == "allow_once" and added_scope_roots:
-                session.native.revoke_scope_roots(added_scope_roots)
-            return pre_dispatch_message, 0.0, interrupted
-
-        self._emit_tool_status(session, call.call_id, status="in_progress")
-        started = time.perf_counter()
-        interruption = ""
-        try:
-            try:
-                if invocation.spec.name in {"shell", "execute_shell_process", "control_shell_process"}:
-                    native_result = session.native.execute(
-                        invocation,
-                        cancel_event=session.cancel_event,
-                        interrupt_probe=lambda: self._tool_interrupt_reason(session),
-                    )
-                else:
-                    native_result = session.native.execute(invocation)
-                result_text = native_result.text
-                exit_code = native_result.exit_code
-                native_status = "completed" if exit_code == 0 else "failed"
-                touched_paths = native_result.touched_paths
-                interruption = native_result.interruption
-                detail = ""
-            except (SandboxError, NativeToolError, OSError) as exc:
-                result_text = f"Error: {exc}"
-                native_status = "failed"
-                exit_code = None
-                touched_paths = ()
-                detail = str(exc)
-        finally:
-            if permission_choice == "allow_once" and added_scope_roots:
-                session.native.revoke_scope_roots(added_scope_roots)
-
-        elapsed_ms = (time.perf_counter() - started) * 1000.0
-        if interruption == "steered":
-            native_status = "failed"
-        self._emit_tool_status(session, call.call_id, status=native_status, text=result_text)
-        session.native.audit.record(
-            session_id=session.session_id,
-            call_id=call.call_id,
-            tool=invocation.spec.name,
-            capability=invocation.spec.capability,
-            permission=(
-                "scope_once" if permission_choice == "allow_once"
-                else "scope_session" if permission_choice in {"allow_always", "allow"}
-                else "allowed"
-            ),
-            outcome=interruption or ("cancelled" if session.cancel_event.is_set() else native_status),
-            exit_code=exit_code,
-            touched_paths=touched_paths,
-            detail=detail,
-        )
-        self._runtime_event(
-            "tool.call.completed",
-            session,
-            data={
-                "kind": "native",
-                "call_id": call.call_id,
-                "tool": invocation.spec.name,
-                "status": native_status,
-                "exit_code": exit_code,
-                "elapsed_ms": elapsed_ms,
-                "interruption": interruption,
-            },
-            content={"arguments": invocation.arguments, "result": result_text},
-        )
-        if session.cancel_event.is_set():
-            return result_text, elapsed_ms, "cancelled"
-        if interruption == "steered" or session.steer_event.is_set():
-            return result_text, elapsed_ms, "steered"
-        return result_text, elapsed_ms, ""
-
-    def _execute_mcp_tool(
-        self, session: Any, call: Any, arguments: dict[str, Any]
-    ) -> tuple[str, float, str]:
-        self._runtime_event(
-            "tool.call.started",
-            session,
-            data={"kind": "mcp", "call_id": call.call_id, "tool": call.name},
-            content={"arguments": arguments},
-        )
-        if session.mcp is None:
-            result_text = f"Error: tool bridge unavailable for {call.name}"
-            self._emit_tool_status(session, call.call_id, status="failed", text=result_text)
-            return result_text, 0.0, ""
-        binding = session.mcp.bindings.get(call.name)
-        live = bool(binding is not None and (
-            not hasattr(session.mcp, "is_live_binding")
-            or session.mcp.is_live_binding(call.name)
-        ))
-        if not live and hasattr(session.mcp, "revalidate_requested_crew_binding"):
-            # A model may request a Crew tool while the live MCP catalogue is
-            # still warming or has changed. A targeted authenticated refresh
-            # can recover a real binding; it cannot grant a missing tool.
-            recovered = session.mcp.revalidate_requested_crew_binding(call.name)
-            if recovered:
-                self._sync_host_capabilities(session)  # update diagnostics after real discovery
-            binding = session.mcp.bindings.get(call.name)
-            live = bool(binding is not None and session.mcp.is_live_binding(call.name))
-        visible = bool(binding is not None and self._mcp_visible_to_agent(session, binding))
-        if not (live and visible):
-            reason = "agent_scope_denied" if live and not visible else (
-                "crew_binding_unverified" if binding is not None else "crew_binding_absent"
-            )
-            result_text = ("Error: MCP tool is not currently granted or verified by KiroCrew. "
-                           f"Diagnostic: {reason}.")
-            self._emit_tool_status(session, call.call_id, status="refused", text=result_text)
-            self._runtime_event(
-                "tool.dispatch.blocked", session,
-                data={"kind": "mcp", "call_id": call.call_id,
-                      "tool": call.name, "reason": reason},
-            )
-            return result_text, 0.0, ""
-        auto_approved = bool(
-            binding is not None
-            and not (hasattr(session.mcp, "is_crew_member_mount")
-                     and session.mcp.is_crew_member_mount(binding.server_name))
-            and session.agent.auto_approves_mcp(
-                server_name=binding.server_name,
-                tool_name=binding.tool_name,
-                public_name=call.name,
-            )
-        )
-        if auto_approved:
-            self._emit_tool_call(session, call.call_id, call.name, arguments)
-            allowed = True
-        else:
-            try:
-                allowed = self._request_tool_permission(
-                    session, call.call_id, call.name, arguments
-                )
-            except ClientRequestError as exc:
-                interruption = self._tool_interrupt_reason(session)
-                if interruption == "cancelled":
-                    return "", 0.0, "cancelled"
-                if interruption == "steered":
-                    result_text = "Interrupted before execution: user steering changed the task."
-                    self._emit_tool_status(session, call.call_id, status="failed", text=result_text)
-                    return result_text, 0.0, "steered"
-                allowed = False
-                self.trace(
-                    f"permission request failed session={session.session_id} "
-                    f"tool={call.name}: {exc}"
-                )
-        if not allowed:
-            result_text = "Permission denied by the Kiro Crew host."
-            self._emit_tool_status(session, call.call_id, status="refused", text=result_text)
-            return result_text, 0.0, ""
-
-        # A permission dialog can remain open while Crew revokes a tool or a
-        # refreshed catalogue changes which server owns a public tool name.
-        # Re-check both the grant and the exact binding identity at dispatch.
-        current_binding = session.mcp.bindings.get(call.name)
-        if (current_binding is None
-                or (current_binding.server_name, current_binding.tool_name)
-                    != (binding.server_name, binding.tool_name)
-                or not self._mcp_visible_to_agent(session, current_binding)
-                or (hasattr(session.mcp, "is_live_binding")
-                    and not session.mcp.is_live_binding(call.name))):
-            result_text = "Error: Crew revoked or changed this MCP tool during approval; it was not dispatched."
-            self._emit_tool_status(session, call.call_id, status="refused", text=result_text)
-            self._runtime_event(
-                "tool.dispatch.blocked", session,
-                data={"kind": "mcp", "call_id": call.call_id, "tool": call.name, "reason": "grant_changed"},
-            )
-            return result_text, 0.0, ""
-
-        pre_dispatch_message, interrupted = self._pre_dispatch_tool_interrupt(
-            session, call.call_id, call.name, kind="mcp"
-        )
-        if interrupted:
-            return pre_dispatch_message, 0.0, interrupted
-
-        self._emit_tool_status(session, call.call_id, status="in_progress")
-        started = time.perf_counter()
-        result_text = session.mcp.call(call.name, arguments)
-        elapsed_ms = (time.perf_counter() - started) * 1000.0
-        failed = result_text.startswith("Error:")
-        status = "failed" if failed else "completed"
-        # A failed MCP tool call may have run before the transport/ack failed.
-        # For side-effect-capable external tools we cannot infer non-execution
-        # from an error string, even if its annotations claim readOnlyHint.
-        if failed:
-            result_text += (
-                "\nExecution outcome may be unknown. Verify external state before "
-                "retrying this tool; do not automatically repeat a mutation."
-            )
-            self._runtime_event(
-                "tool.effect.uncertain", session,
-                data={"kind": "mcp", "call_id": call.call_id, "tool": call.name,
-                      "effect_class": "unknown_write", "reason": "tool_error"},
-            )
-        interrupted_after = self._tool_interrupt_reason(session)
-        if interrupted_after:
-            # The call was already dispatched. A cancellation or steering event
-            # does not undo a possibly committed remote action.
-            self._runtime_event(
-                "tool.effect.uncertain", session,
-                data={"kind": "mcp", "call_id": call.call_id, "tool": call.name,
-                      "effect_class": "unknown_write", "reason": interrupted_after},
-            )
-        self._emit_tool_status(session, call.call_id, status=status, text=result_text)
-        self._runtime_event(
-            "tool.call.completed",
-            session,
-            data={"kind": "mcp", "call_id": call.call_id, "tool": call.name, "status": status,
-                  "elapsed_ms": elapsed_ms, "interruption": interrupted_after},
-            content={"arguments": arguments, "result": result_text},
-        )
-        return result_text, elapsed_ms, interrupted_after
 
     @staticmethod
     def _relay_gathering_tool(session: Any, name: str) -> bool:
@@ -2731,7 +2285,7 @@ class TurnRunnerMixin:
                 data={
                     "review_provider": review_provider.id,
                     "review_model": review_model.model_id,
-                    "error": type(exc).__name__,
+                    "error": type(exc).__name__, "error_category": str(getattr(exc, "category", "provider") or "provider"),
                 },
             )
             append_lifecycle(
@@ -2950,8 +2504,15 @@ class TurnRunnerMixin:
         provider_rounds_total: int,
     ) -> tuple[Any, str, str]:
         """Observe one tool result and return decision + optional notices."""
+        # A display-only description must not make repeated native executions
+        # look like new work to the runaway/stagnation guard. MCP tools may
+        # legitimately define their own "description" executable argument.
+        signature_args = arguments
+        if (isinstance(arguments, dict) and session.native is not None
+                and session.native.has_tool(getattr(call, "name", ""))):
+            signature_args = {key: value for key, value in arguments.items() if key != "description"}
         decision = execution_guard.observe(
-            f"{round_role}:{getattr(call, 'name', '')}", arguments, result_text
+            f"{round_role}:{getattr(call, 'name', '')}", signature_args, result_text
         )
         pending_replan_notice = ""
         execution_guard_reason = ""
@@ -4160,62 +3721,7 @@ class TurnRunnerMixin:
             return _LoopDirective.RETURN
 
         if batch_outcome.stop_requested:
-            if (
-                round_ctx.role == "worker"
-                and state.execution_guard_reason != "emergency_tool_call_limit"
-            ):
-                self._runtime_event(
-                    "model.relay.guard_handback",
-                    session,
-                    data={
-                        "reason": state.execution_guard_reason,
-                        "worker_model": round_ctx.model.model_id,
-                        "step": state.step,
-                    },
-                )
-                state.relay = None
-                state.relay_next_role = "lead"
-                state.pending_replan_notice = (
-                    "The read-only worker was stopped because its tool work became repetitive. "
-                    "Re-plan from the lead role using the results already gathered; do not repeat "
-                    "the same tool/action cycle."
-                )
-                state.execution_guard.reset_stagnation_window()
-                state.execution_guard_reason = ""
-                self._advance_turn_phase(
-                    session, state.turn_state, TurnPhase.CONTINUE,
-                    reason="worker_guard_handback",
-                )
-                return _LoopDirective.WORKER_GUARD_HAND_BACK
-
-            state.execution_guard_halted = True
-            if state.execution_guard_reason == "emergency_tool_call_limit":
-                state.final_text = (
-                    "本轮已触发异常执行保护：工具调用量达到灾难级安全上限。"
-                    "已停止继续调用工具，并保留当前已经完成的工作记录。"
-                )
-            else:
-                state.final_text = (
-                    "检测到工具调用在重新规划后仍持续重复、没有产生新进展，"
-                    "本轮已停止继续调用工具。当前已完成的工作记录已保留。"
-                )
-            with session.state_lock:
-                append_message(session, {"role": "assistant", "content": state.final_text})
-            self._runtime_event(
-                "execution.guard.stopped",
-                session,
-                data={
-                    "reason": state.execution_guard_reason,
-                    "tool_calls_seen": state.execution_guard.tool_calls_seen,
-                    "step": state.step,
-                    "role": round_ctx.role,
-                },
-            )
-            self._advance_turn_phase(
-                session, state.turn_state, TurnPhase.CONTINUE,
-                reason="execution_guard_stopped",
-            )
-            return _LoopDirective.STOP
+            return self._handle_tool_guard_stop(session, state, round_ctx)
 
         if batch_outcome.replan_requested:
             self._advance_turn_phase(
@@ -4241,6 +3747,69 @@ class TurnRunnerMixin:
             reason="tool_results_ready",
         )
         return _LoopDirective.NONE
+
+    def _handle_tool_guard_stop(
+        self, session: Any, state: _ProviderLoopState,
+        round_ctx: _ProviderRoundContext,
+    ) -> _LoopDirective:
+        """Finish a stopped tool batch without scheduling any further tools."""
+        if (
+            round_ctx.role == "worker"
+            and state.execution_guard_reason != "emergency_tool_call_limit"
+        ):
+            self._runtime_event(
+                "model.relay.guard_handback",
+                session,
+                data={
+                    "reason": state.execution_guard_reason,
+                    "worker_model": round_ctx.model.model_id,
+                    "step": state.step,
+                },
+            )
+            state.relay = None
+            state.relay_next_role = "lead"
+            state.pending_replan_notice = (
+                "The read-only worker was stopped because its tool work became repetitive. "
+                "Re-plan from the lead role using the results already gathered; do not repeat "
+                "the same tool/action cycle."
+            )
+            state.execution_guard.reset_stagnation_window()
+            state.execution_guard_reason = ""
+            self._advance_turn_phase(
+                session, state.turn_state, TurnPhase.CONTINUE,
+                reason="worker_guard_handback",
+            )
+            return _LoopDirective.WORKER_GUARD_HAND_BACK
+
+        state.execution_guard_halted = True
+        if state.execution_guard_reason == "emergency_tool_call_limit":
+            state.final_text = (
+                "本轮已触发异常执行保护：工具调用量达到灾难级安全上限。"
+                "已停止继续调用工具，并保留当前已经完成的工作记录。"
+            )
+        else:
+            state.final_text = (
+                "检测到工具调用在重新规划后仍持续重复、没有产生新进展，"
+                "本轮已停止继续调用工具。当前已完成的工作记录已保留。"
+            )
+        with session.state_lock:
+            append_message(session, {"role": "assistant", "content": state.final_text})
+        self._runtime_event(
+            "execution.guard.stopped",
+            session,
+            data={
+                "reason": state.execution_guard_reason,
+                "tool_calls_seen": state.execution_guard.tool_calls_seen,
+                "step": state.step,
+                "role": round_ctx.role,
+            },
+        )
+        self._advance_turn_phase(
+            session, state.turn_state, TurnPhase.CONTINUE,
+            reason="execution_guard_stopped",
+        )
+        return _LoopDirective.STOP
+
 
     def _run_provider_post_stage(
         self,
@@ -4431,21 +4000,10 @@ class TurnRunnerMixin:
                 )
 
                 if session.cancel_event.is_set():
-                    self._recover_current_turn(
-                        session,
-                        history_start,
-                        reason="cancelled_before_invoke",
-                        preserve_side_effects=state.side_effect_risk_seen,
+                    self._finish_provider_loop_cancelled_before_invoke(
+                        req_id, session, state, history_start=history_start,
+                        t_prompt=t_prompt, routing_decision=routing_decision,
                     )
-                    self._advance_turn_phase(
-                        session, state.turn_state, TurnPhase.COMPLETE,
-                        reason="cancelled_before_invoke",
-                    )
-                    self._record_provider_turn_telemetry(
-                        session, state, outcome="cancelled", t_prompt=t_prompt,
-                        routing_decision=routing_decision, error_category="control",
-                    )
-                    self.result(req_id, self._provider_prompt_result(state, "cancelled"))
                     return
 
                 directive, round_outcome = self._invoke_provider_loop_round(
@@ -4541,91 +4099,18 @@ class TurnRunnerMixin:
                 # the logical step exactly once at the next iteration.
 
         except ProviderError as exc:
-            error_category = str(getattr(exc, "category", "provider") or "provider")
-            self._recover_current_turn(
-                session,
-                history_start,
-                reason=f"{error_category}_error",
-                preserve_side_effects=state.side_effect_risk_seen,
-            )
-            if not state.turn_state.complete:
-                self._advance_turn_phase(
-                    session, state.turn_state, TurnPhase.COMPLETE,
-                    reason="provider_error",
-                )
-            self.emit_runtime_error(session_id, str(exc))
-            self._record_provider_turn_telemetry(
-                session,
-                state,
-                outcome="error",
-                t_prompt=t_prompt,
-                routing_decision=routing_decision,
-                error_kind=type(exc).__name__,
-                error_category=error_category,
-            )
-            self.result(req_id, self._provider_prompt_result(state, "end_turn"))
-            t_end = time.perf_counter()
-            self.trace(
-                f"session/prompt ERROR total={(t_end-t_prompt)*1000:.0f}ms "
-                f"pre_upstream={(t_ready-t_prompt)*1000:.0f}ms "
-                f"mcp_wait={state.mcp_wait_ms:.0f}ms upstream={state.upstream_ms:.0f}ms tool={state.tool_ms:.0f}ms "
-                f"provider_rounds={state.provider_rounds_total} tool_calls={state.tool_calls_total} native_calls={state.native_tool_calls_total} "
-                f"tool_search_calls={state.tool_search_calls_total} "
-                f"loaded_tools={len(session.loaded_tool_names)} model={state.model.model_id} "
-                f"error_category={error_category} side_effects={sorted(state.side_effect_classes_seen)} error={exc}"
+            self._finish_provider_loop_provider_error(
+                req_id, session_id, session, state, exc,
+                history_start=history_start, t_prompt=t_prompt,
+                t_ready=t_ready, routing_decision=routing_decision,
             )
             return
         except Exception as exc:
-            self._recover_current_turn(
-                session,
-                history_start,
-                reason="internal_error",
-                preserve_side_effects=state.side_effect_risk_seen,
-            )
-            if not state.turn_state.complete:
-                self._advance_turn_phase(
-                    session, state.turn_state, TurnPhase.COMPLETE,
-                    reason="internal_error",
-                )
-            # Preserve a metadata-only location for otherwise opaque failures
-            # such as AttributeError. Never store traceback locals or secrets.
-            import traceback
-            frames = traceback.extract_tb(exc.__traceback__)
-            last_frame = frames[-1] if frames else None
-            error_site = (
-                f"{last_frame.filename.replace(chr(92), '/').rsplit('/', 1)[-1]}:{last_frame.lineno}:{last_frame.name}"
-                if last_frame is not None else ""
-            )
-            self._runtime_event(
-                "runtime.internal_error",
-                session,
-                data={
-                    "error": type(exc).__name__,
-                    "site": error_site,
-                    "provider_id": state.served_provider_id,
-                    "model": state.served_model_id,
-                    "side_effects": sorted(state.side_effect_classes_seen),
-                },
-            )
-            self.trace(
-                f"recovered internal turn error session={session_id} "
-                f"{type(exc).__name__}: {exc}"
-            )
-            self.emit_runtime_error(
-                session_id,
-                f"Kiro BYO runtime error ({type(exc).__name__}). The session was recovered and can continue.",
-            )
-            self._record_provider_turn_telemetry(
-                session,
-                state,
-                outcome="error",
-                t_prompt=t_prompt,
+            self._finish_provider_loop_internal_error(
+                req_id, session_id, session, state, exc,
+                history_start=history_start, t_prompt=t_prompt,
                 routing_decision=routing_decision,
-                error_kind=type(exc).__name__,
-                error_category="internal",
-                error_site=error_site,
             )
-            self.result(req_id, self._provider_prompt_result(state, "end_turn"))
             return
 
         self._run_provider_post_stage(
@@ -4642,6 +4127,214 @@ class TurnRunnerMixin:
             runtime_mode_context=runtime_mode_context,
             routing_decision=routing_decision,
         )
+
+    def _rewind_durable_prompt(
+        self, req_id: Any, session_id: str, session: Any, config: Any,
+        resume_run_id: str, recovery_strategy: str,
+    ) -> bool:
+        """Revalidate and rewind only after the session turn lock was acquired."""
+        record = self._durable_run_store().get(resume_run_id)
+        recovery = RecoveryPolicy.durable_run(record, strategy=recovery_strategy or "resume")
+        if (
+            not recovery.safe or record is None
+            or str(record.get("session_id") or "") != session_id
+        ):
+            self.error(req_id, -32010, f"durable recovery is no longer safe: {recovery.reason}")
+            return False
+        metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+        try:
+            recovery_history_start = max(0, int(metadata.get("history_start", 0)))
+        except (TypeError, ValueError):
+            recovery_history_start = 0
+        with session.state_lock:
+            if len(session.messages) > recovery_history_start:
+                truncate_messages(session, recovery_history_start, reason="durable_recovery_rewind")
+                append_lifecycle(
+                    session, "run/recovery_rewind",
+                    {
+                        "run_id": resume_run_id, "history_start": recovery_history_start,
+                        "strategy": recovery_strategy or "resume",
+                    },
+                )
+            if (recovery_strategy or "").lower() == "replan":
+                selected_type_for_replan = self._type_for_selection(config, session.model)
+                if selected_type_for_replan is not None:
+                    clear_route_pin(
+                        session, f"{config.mode_pack}:{selected_type_for_replan}",
+                        reason="durable_replan",
+                    )
+        self._persist_session(session)
+        self._runtime_event(
+            "run.recovery.rewound", session,
+            data={
+                "run_id": resume_run_id, "history_start": recovery_history_start,
+                "strategy": recovery_strategy or "resume",
+            },
+        )
+        return True
+
+    def _execute_prompt_request_locked(
+        self, req_id: Any, params: dict[str, Any], session: Any, session_id: str,
+        t_prompt: float, resume_run_id: str, recovery_strategy: str,
+    ) -> None:
+        """Execute one admitted turn while the caller owns both turn locks."""
+        history_start = len(session.messages)
+        text = self.prompt_text(params)
+        user_message, has_image = self.prompt_message(params)
+
+        # Echo fallback remains useful for installation diagnostics.
+        if session.model in {MODEL_ECHO, MODEL_UPPER}:
+            if text.strip().startswith("/compact"):
+                with session.state_lock:
+                    clear_messages(session, reason="legacy_compact_reset")
+                self._persist_session(session)
+                self.result(req_id, {"stopReason": "end_turn"})
+                return
+            reply = f"Echo: {text}"
+            if session.model == MODEL_UPPER:
+                reply = reply.upper()
+            self.emit_text(session_id, reply)
+            self.result(req_id, {"stopReason": "end_turn"})
+            return
+
+        try:
+            config = self._config()
+        except ConfigError as exc:
+            self.emit_runtime_error(session_id, f"configuration error: {exc}")
+            self.result(req_id, {"stopReason": "end_turn"})
+            return
+
+        # Durable recovery mutates transcript/routing state only after this
+        # prompt owns the session turn lock. The public recovery handler does
+        # validation and prompt reconstruction but never rewinds state itself,
+        # avoiding a race with a concurrently arriving ordinary prompt.
+        if resume_run_id and not self._rewind_durable_prompt(
+            req_id, session_id, session, config, resume_run_id, recovery_strategy,
+        ):
+            return
+
+        route = self._prepare_prompt_routing(
+            req_id, session_id, session, config, text, has_image,
+        )
+        if route is None:
+            return
+        provider, model = route.provider, route.model
+        selection_truth = route.selection_truth
+        mode_fallbacks = route.mode_fallbacks
+        post_stage = route.post_stage
+        primary_effort, primary_thinking = route.primary_effort, route.primary_thinking
+        reasoning_profile, routing_signals = route.reasoning_profile, route.routing_signals
+        runtime_mode_context, relay = extend_crew_context(route.runtime_mode_context, session, config, route.decision, text, self._mcp_visible_to_agent), route.relay
+        execution_plan, decision = route.execution_plan, route.decision
+        review_target = route.post_stage
+        t_ready = time.perf_counter()
+
+        if text.strip().startswith("/compact"):
+            # Compatibility route for Crew 0.9.0-insider.1, which still sends
+            # manual compaction as a prompt. Current Kiro V3 clients should
+            # use the advertised ``_kiro/session/compact`` extension instead.
+            # The compaction body + lifecycle emission is shared with the
+            # typed extension via _run_compaction; this path only adds its
+            # own JSON-RPC response.
+            summary, detail = self._run_compaction(
+                session, provider, model, self._compact_context_suffix(text)
+            )
+            if summary is None:
+                if detail == "cancelled":
+                    self.result(req_id, {"stopReason": "cancelled"})
+                else:
+                    self.error(req_id, -32603, f"compaction failed: {detail}")
+                return
+            self.result(req_id, {"stopReason": "end_turn"})
+            return
+
+        # Empty modalities mean "provider did not declare this capability",
+        # not an explicit text-only claim. In that unknown case let the
+        # upstream decide; only block images when the provider supplied a
+        # non-empty modality list that excludes image input.
+        if has_image and model.input_modalities and "image" not in model.input_modalities:
+            self.emit_runtime_error(
+                session_id,
+                f"{model.name} explicitly does not advertise image input. Choose an image-capable model.",
+            )
+            self.result(req_id, {"stopReason": "end_turn"})
+            return
+
+        with session.state_lock:
+            history_start = len(session.messages)
+            append_lifecycle(session, "turn/start", {
+                "history_start": history_start,
+                "recovery_run_id": resume_run_id,
+                "recovery_strategy": recovery_strategy,
+            })
+            append_message(session, user_message)
+            user_event_seq = len(session.events) - 1
+            session.active_turn_id = f"{session.session_id}:{user_event_seq}"
+        # Persist the user-message anchor before any provider/tool side effect.
+        # Durable recovery references this immutable event even if the active
+        # transcript is later transactionally truncated. If the anchor
+        # cannot be durably recorded, no model or tool may run on this turn.
+        if self._persist_session(session) is False:
+            self.emit_runtime_error(
+                session_id, "session checkpoint could not be saved; no model or tools were invoked",
+            )
+            self.result(req_id, {"stopReason": "end_turn"})
+            return
+
+        # Materialize the logical agent graph only after all prompt-level
+        # early exits have passed. This keeps AgentTask lifecycle aligned
+        # with a real turn transaction instead of leaving orphan plans for
+        # /compact or unsupported-input requests.
+        if execution_plan is not None:
+            self._begin_agent_plan(session, execution_plan)
+        started_run_id = self._begin_durable_run(
+            session, execution_plan, selection=str(selection_truth.get("id") or session.model),
+            provider_id=provider.id, model_id=model.model_id, history_start=history_start,
+            user_event_seq=user_event_seq, resume_run_id=resume_run_id,
+            recovery_strategy=recovery_strategy,
+        )
+        if not started_run_id:
+            # A failed resume admission or partial ledger write must not
+            # silently turn into an untracked, possibly mutating ACP turn.
+            self._finalize_agent_plan(
+                session, "error", provider_id=provider.id, model_id=model.model_id,
+            )
+            self.emit_runtime_error(
+                session_id, "durable execution could not be started; no model or tools were invoked",
+            )
+            self.result(req_id, {"stopReason": "end_turn"})
+            return
+
+        # A shared, Mode-neutral projection of the real decision. Emit only
+        # after durable admission so run_id/turn_id are authoritative.
+        if decision is not None:
+            self._runtime_event(
+                "model.route.selected", session,
+                data=selected_route_event_data(
+                    requested_model=session.model,
+                    selection=selection_truth,
+                    decision=decision,
+                    execution_plan=execution_plan,
+                    review_target=review_target,
+                    provider=provider,
+                    model=model,
+                ),
+                content={"prompt": text},
+            )
+
+        self._run_provider_tool_loop(
+            req_id, session_id, session, provider, model, history_start, t_prompt, t_ready, mode_fallbacks, post_stage,
+            primary_effort=primary_effort,
+            primary_thinking=primary_thinking,
+            relay=relay,
+            reasoning_profile=reasoning_profile,
+            routing_signals=routing_signals,
+            runtime_mode_context=runtime_mode_context,
+            routing_config=config,
+            routing_decision=decision,
+            execution_plan=execution_plan,
+        )
+        return
 
     def _handle_prompt_request(self, req_id: Any, params: dict[str, Any]) -> None:
         t_prompt = time.perf_counter()
@@ -4708,414 +4401,12 @@ class TurnRunnerMixin:
             session.turn_started_at = t_prompt
             session.active_turn = True
 
-        history_start = len(session.messages)
         resume_run_id = str(params.get("_kiro_resume_run_id") or "")
         recovery_strategy = str(params.get("_kiro_recovery_strategy") or "")
         try:
-            text = self.prompt_text(params)
-            user_message, has_image = self.prompt_message(params)
-
-            # Echo fallback remains useful for installation diagnostics.
-            if session.model in {MODEL_ECHO, MODEL_UPPER}:
-                if text.strip().startswith("/compact"):
-                    with session.state_lock:
-                        clear_messages(session, reason="legacy_compact_reset")
-                    self._persist_session(session)
-                    self.result(req_id, {"stopReason": "end_turn"})
-                    return
-                reply = f"Echo: {text}"
-                if session.model == MODEL_UPPER:
-                    reply = reply.upper()
-                self.emit_text(session_id, reply)
-                self.result(req_id, {"stopReason": "end_turn"})
-                return
-
-            try:
-                config = self._config()
-            except ConfigError as exc:
-                self.emit_runtime_error(session_id, f"configuration error: {exc}")
-                self.result(req_id, {"stopReason": "end_turn"})
-                return
-
-            # Durable recovery mutates transcript/routing state only after this
-            # prompt owns the session turn lock. The public recovery handler does
-            # validation and prompt reconstruction but never rewinds state itself,
-            # avoiding a race with a concurrently arriving ordinary prompt.
-            if resume_run_id:
-                record = self._durable_run_store().get(resume_run_id)
-                recovery = RecoveryPolicy.durable_run(record, strategy=recovery_strategy or "resume")
-                if (
-                    not recovery.safe or record is None
-                    or str(record.get("session_id") or "") != session_id
-                ):
-                    self.error(req_id, -32010, f"durable recovery is no longer safe: {recovery.reason}")
-                    return
-                metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
-                try:
-                    recovery_history_start = max(0, int(metadata.get("history_start", 0)))
-                except (TypeError, ValueError):
-                    recovery_history_start = 0
-                with session.state_lock:
-                    if len(session.messages) > recovery_history_start:
-                        truncate_messages(session, recovery_history_start, reason="durable_recovery_rewind")
-                        append_lifecycle(
-                            session, "run/recovery_rewind",
-                            {
-                                "run_id": resume_run_id, "history_start": recovery_history_start,
-                                "strategy": recovery_strategy or "resume",
-                            },
-                        )
-                    if (recovery_strategy or "").lower() == "replan":
-                        selected_type_for_replan = self._type_for_selection(config, session.model)
-                        if selected_type_for_replan is not None:
-                            clear_route_pin(
-                                session, f"{config.mode_pack}:{selected_type_for_replan}",
-                                reason="durable_replan",
-                            )
-                self._persist_session(session)
-                self._runtime_event(
-                    "run.recovery.rewound", session,
-                    data={
-                        "run_id": resume_run_id, "history_start": recovery_history_start,
-                        "strategy": recovery_strategy or "resume",
-                    },
-                )
-
-            # Tool visibility is projected by Crew at session creation. On a
-            # cold interactive browser turn, briefly join the MCP warmup so the
-            # first model round can see the actual Crew browser schema.
-            self._prepare_crew_browser_for_turn(session, text)
-            self._sync_host_capabilities(session)
-            selection_truth = self._ensure_selection_truth(session, config)
-            session.response_language_preference = getattr(config, "response_language", "auto")
-            session.ui_language_preference = getattr(config, "ui_language", "auto")
-            self._apply_reasoning_language_policy(
-                session, getattr(config, "reasoning_language", "auto"), text
+            self._execute_prompt_request_locked(
+                req_id, params, session, session_id, t_prompt, resume_run_id, recovery_strategy,
             )
-            mode_fallbacks: list[tuple[Any, Any]] = []
-            post_stage: ReviewTarget | None = None
-            primary_effort = ""
-            primary_thinking = ""
-            reasoning_profile = None
-            routing_signals = None
-            runtime_mode_context = ""
-            relay: Any = None
-            execution_plan: ExecutionPlan | None = None
-            # Routed Type turns populate a RouteDecision. Concrete-model turns
-            # intentionally bypass the router, so keep the value explicitly
-            # absent instead of leaving a branch-local name unbound.
-            decision = None
-            selected_type = self._type_for_selection(config, session.model)
-            if selected_type is not None:
-                # Tool visibility and current-turn tool need are independent. A
-                # Personal Agent may expose many tools while the user only says
-                # "hello"; that must not exclude otherwise valid models.
-                route_tools = self._active_tools_for_turn(session)
-                tools_available = bool(route_tools)
-                tools_required = infer_tools_required(
-                    text, tools=route_tools, history=self._runtime_seams().session_projection.snapshot(session).messages
-                )
-                decision = self._runtime_seams().model_router.route(
-                    config,
-                    pack=config.mode_pack,
-                    policy=selected_type,
-                    prompt=text,
-                    history=self._runtime_seams().session_projection.snapshot(session).messages,
-                    has_image=has_image,
-                    tools_required=tools_required,
-                    tools_available=tools_available,
-                    # Type effort is chosen only after a concrete model is selected.
-                    # Never let a stale/manual session level filter the Type pool.
-                    reasoning_effort="",
-                )
-                if decision is None:
-                    self._runtime_event(
-                        "model.route.failed", session,
-                        data={"pack": config.mode_pack, "policy": selected_type, "reason": "no eligible model"},
-                    )
-                    self.emit_runtime_error(session_id, "Kiro BYO mode could not find an eligible configured model for this turn")
-                    self.result(req_id, {"stopReason": "end_turn"})
-                    return
-                provider, model = decision.provider, decision.model
-                execution_intent = decision.execution_intent
-                runtime_mode_context = runtime_policy_context_for_request(
-                    decision.pack, decision.policy, text, active=True
-                )
-                routing_signals = decision.signals
-                pin_key = f"{decision.pack}:{decision.policy}"
-                pin_restored = False
-                if execution_intent.sticky:
-                    pins = self._runtime_seams().session_projection.snapshot(session).route_pins
-                    pinned = pins.get(pin_key) if isinstance(pins, dict) else None
-                    if pinned:
-                        # Keep a long task on the model it started with, as long
-                        # as that model is still eligible for this turn.
-                        # A historic sticky pin is valid only inside this turn's
-                        # executable tier/capability pool. candidates also includes
-                        # out-of-tier models for diagnostics and optional reviewers.
-                        for row in decision.execution_fallbacks:
-                            if (row.provider.id, row.model.model_id) == pinned:
-                                provider, model = row.provider, row.model
-                                pin_restored = True
-                                break
-                    if isinstance(pins, dict):
-                        set_route_pin(
-                            session, pin_key, provider.id, model.model_id, reason="sticky_policy"
-                        )
-                if pin_restored or provider is not decision.provider or model is not decision.model:
-                    from dataclasses import replace as _dc_replace
-
-                    decision = _dc_replace(
-                        decision, provider=provider, model=model,
-                        selection_source="sticky_pin" if pin_restored else "policy_ranked",
-                    )
-                mode_fallbacks = [
-                    (row.provider, row.model) for row in decision.execution_fallbacks
-                    if (row.provider.id, row.model.model_id) != (provider.id, model.model_id)
-                ]
-                # AUTO thinking and AUTO effort are independent policy axes.
-                # The concrete model's capabilities and explicit user locks are
-                # resolved before anything reaches a provider adapter.
-                reasoning_profile = execution_intent.reasoning
-                primary_thinking, primary_effort = self._runtime_seams().reasoning_resolver.resolve(
-                    model, session, reasoning_profile, decision.signals,
-                    role="lead", stage="planning",
-                )
-                execution_plan = build_execution_plan(decision)
-                if execution_plan.worker is not None:
-                    teammate = self._relay_teammate(
-                        decision, provider, model, config=config, signals=decision.signals
-                    )
-                    if teammate is not None:
-                        # The tuple remains a compatibility carrier for the
-                        # currently routed worker. The plan, not a Type-specific
-                        # branch, decides whether this role exists.
-                        relay = (teammate[0], teammate[1], "")
-                review_target = execution_plan.post_stage
-                post_stage = review_target
-                append_lifecycle(
-                    session,
-                    "model/selected",
-                    {
-                        "pack": decision.pack,
-                        "policy": decision.policy,
-                        "provider_id": provider.id,
-                        "model": model.model_id,
-                        "execution_mode": execution_plan.mode,
-                        "selection_kind": selection_truth["kind"],
-                        "selection_source": selection_truth["source"],
-                        "routing_applied": True,
-                    },
-                )
-                self._runtime_event(
-                    "model.route.selected", session,
-                    data={
-                        "requested_model": session.model,
-                        "selection": selection_truth,
-                        "pack": decision.pack,
-                        "pack_label": decision.pack_label,
-                        "policy": decision.policy,
-                        "policy_label": decision.policy_label,
-                        "execution_mode": execution_plan.mode,
-                        "execution_rationale": list(execution_plan.rationale),
-                        "selection_source": decision.selection_source,
-                        "eligible_models": len(decision.candidates),
-                        "in_tier_models": len(decision.execution_fallbacks),
-                        "excluded_models": [
-                            {"provider_id": p, "model": m, "reason": r}
-                            for p, m, r in decision.exclusions[:12]
-                        ],
-                        "secondary_stage": (
-                            {
-                                "role": review_target.role,
-                                "provider_id": review_target.provider.id,
-                                "model": review_target.model.model_id,
-                                "reason": review_target.reason,
-                            } if review_target else None
-                        ),
-                        "provider_id": provider.id,
-                        "resolved_model": model.model_id,
-                        "resolved_model_name": model.name,
-                        "signals": {
-                            "prompt_chars": decision.signals.prompt_chars,
-                            "history_chars": decision.signals.history_chars,
-                            "history_messages": decision.signals.history_messages,
-                            "has_image": decision.signals.has_image,
-                            "tools_available": decision.signals.tools_available,
-                            "tools_required": decision.signals.tools_required,
-                            # Compatibility field for older Runtime Inspector readers.
-                            "tools_expected": decision.signals.tools_required,
-                            "reasoning_effort": decision.signals.reasoning_effort,
-                            "code_task": decision.signals.code_task,
-                            "complexity": round(decision.signals.complexity, 4),
-                            "breadth": round(decision.signals.breadth, 4),
-                            "parallelizability": round(decision.signals.parallelizability, 4),
-                            "risk": round(decision.signals.risk, 4),
-                            "tool_intensity": round(decision.signals.tool_intensity, 4),
-                            "write_intensity": round(decision.signals.write_intensity, 4),
-                            "context_demand": round(decision.signals.context_demand, 4),
-                            "verification_value": round(decision.signals.verification_value, 4),
-                            "latency_sensitivity": round(decision.signals.latency_sensitivity, 4),
-                            "task_profile": decision.signals.task_profile,
-                            "estimated_input_tokens": decision.signals.estimated_input_tokens,
-                        },
-                        "reasons": list(decision.reason),
-                        "candidates": [
-                            {
-                                "provider_id": row.provider.id,
-                                "model": row.model.model_id,
-                                "name": row.model.name,
-                                "score": round(row.score, 5),
-                                "quality": round(row.quality, 4),
-                                "speed": round(row.speed, 4),
-                                "economy": round(row.economy, 4),
-                                "reliability": round(row.reliability, 4),
-                                "runtime_samples": row.runtime_samples,
-                                "runtime_confidence": row.runtime_confidence,
-                                "static_speed": round(row.static_speed, 4),
-                                "runtime_speed": (round(row.runtime_speed, 4) if row.runtime_speed is not None else None),
-                                "reasons": list(row.reasons),
-                            }
-                            for row in decision.candidates[:12]
-                        ],
-                    },
-                    content={"prompt": text},
-                )
-            else:
-                resolved = self._resolved_model(config, session)
-                if resolved is None:
-                    self.emit_runtime_error(
-                        session_id,
-                        f"model {session.model!r} is no longer present in config/providers.json",
-                    )
-                    self.result(req_id, {"stopReason": "end_turn"})
-                    return
-                provider, model = resolved
-                runtime_mode_context = runtime_policy_context_for_request(
-                    config.mode_pack, config.mode_type, text, active=False
-                )
-                # A concrete model selection still obeys that model's persistent
-                # BYO Auto/On/Off preference. With no Type suggestion, Auto
-                # preserves the verified model/provider default.
-                primary_thinking = resolve_thinking_mode(
-                    model, getattr(model, "thinking_preference", "auto"), ""
-                )
-                append_lifecycle(
-                    session,
-                    "model/selected",
-                    {
-                        "pack": "",
-                        "policy": "concrete",
-                        "provider_id": provider.id,
-                        "model": model.model_id,
-                        "execution_mode": "single_pass",
-                        "selection_kind": selection_truth["kind"],
-                        "selection_source": selection_truth["source"],
-                        "routing_applied": False,
-                    },
-                )
-                self._runtime_event(
-                    "model.route.bypassed", session,
-                    data={
-                        "requested_model": session.model,
-                        "selection": selection_truth,
-                        "provider_id": provider.id,
-                        "resolved_model": model.model_id,
-                        "reason": "concrete model selected",
-                    },
-                    content={"prompt": text},
-                )
-            t_ready = time.perf_counter()
-
-            if text.strip().startswith("/compact"):
-                # Compatibility route for Crew 0.9.0-insider.1, which still sends
-                # manual compaction as a prompt. Current Kiro V3 clients should
-                # use the advertised ``_kiro/session/compact`` extension instead.
-                # The compaction body + lifecycle emission is shared with the
-                # typed extension via _run_compaction; this path only adds its
-                # own JSON-RPC response.
-                summary, detail = self._run_compaction(
-                    session, provider, model, self._compact_context_suffix(text)
-                )
-                if summary is None:
-                    if detail == "cancelled":
-                        self.result(req_id, {"stopReason": "cancelled"})
-                    else:
-                        self.error(req_id, -32603, f"compaction failed: {detail}")
-                    return
-                self.result(req_id, {"stopReason": "end_turn"})
-                return
-
-            # Empty modalities mean "provider did not declare this capability",
-            # not an explicit text-only claim. In that unknown case let the
-            # upstream decide; only block images when the provider supplied a
-            # non-empty modality list that excludes image input.
-            if has_image and model.input_modalities and "image" not in model.input_modalities:
-                self.emit_runtime_error(
-                    session_id,
-                    f"{model.name} explicitly does not advertise image input. Choose an image-capable model.",
-                )
-                self.result(req_id, {"stopReason": "end_turn"})
-                return
-
-            with session.state_lock:
-                history_start = len(session.messages)
-                append_lifecycle(session, "turn/start", {
-                    "history_start": history_start,
-                    "recovery_run_id": resume_run_id,
-                    "recovery_strategy": recovery_strategy,
-                })
-                append_message(session, user_message)
-                user_event_seq = len(session.events) - 1
-                session.active_turn_id = f"{session.session_id}:{user_event_seq}"
-            # Persist the user-message anchor before any provider/tool side effect.
-            # Durable recovery references this immutable event even if the active
-            # transcript is later transactionally truncated. If the anchor
-            # cannot be durably recorded, no model or tool may run on this turn.
-            if self._persist_session(session) is False:
-                self.emit_runtime_error(
-                    session_id, "session checkpoint could not be saved; no model or tools were invoked",
-                )
-                self.result(req_id, {"stopReason": "end_turn"})
-                return
-
-            # Materialize the logical agent graph only after all prompt-level
-            # early exits have passed. This keeps AgentTask lifecycle aligned
-            # with a real turn transaction instead of leaving orphan plans for
-            # /compact or unsupported-input requests.
-            if execution_plan is not None:
-                self._begin_agent_plan(session, execution_plan)
-            started_run_id = self._begin_durable_run(
-                session, execution_plan, selection=str(selection_truth.get("id") or session.model),
-                provider_id=provider.id, model_id=model.model_id, history_start=history_start,
-                user_event_seq=user_event_seq, resume_run_id=resume_run_id,
-                recovery_strategy=recovery_strategy,
-            )
-            if not started_run_id:
-                # A failed resume admission or partial ledger write must not
-                # silently turn into an untracked, possibly mutating ACP turn.
-                self._finalize_agent_plan(
-                    session, "error", provider_id=provider.id, model_id=model.model_id,
-                )
-                self.emit_runtime_error(
-                    session_id, "durable execution could not be started; no model or tools were invoked",
-                )
-                self.result(req_id, {"stopReason": "end_turn"})
-                return
-
-            self._run_provider_tool_loop(
-                req_id, session_id, session, provider, model, history_start, t_prompt, t_ready, mode_fallbacks, post_stage,
-                primary_effort=primary_effort,
-                primary_thinking=primary_thinking,
-                relay=relay,
-                reasoning_profile=reasoning_profile,
-                routing_signals=routing_signals,
-                runtime_mode_context=runtime_mode_context,
-                routing_config=config,
-                routing_decision=decision,
-                execution_plan=execution_plan,
-            )
-            return
         finally:
             with session.state_lock:
                 session.active_turn = False

@@ -63,10 +63,12 @@ class ManagementUiTests(unittest.TestCase):
         # overview uses bounded request/run state. Heavy Runtime Trace and the
         # KiroCrew integration audit remain lazy.
         self.assertIn("Promise.allSettled([loadStatus(),loadPresets(),loadOps()])", source)
-        self.assertIn("if(tab==='records')Promise.allSettled([loadOps(),loadTrace()])", source)
+        self.assertIn("if(tab==='records')Promise.allSettled([loadOps(),loadTrace(),loadRecords()])", source)
         self.assertIn("if(section==='crew')onAuditReload", source)
-        initial = source.split("useEffect(()=>{Promise.allSettled([loadStatus(),loadPresets(),loadOps()])", 1)[1].split("},[loadStatus,loadPresets,loadOps,tab])", 1)[0]
+        initial = source.split("useEffect(()=>{Promise.allSettled([loadStatus(),loadPresets(),loadOps()])", 1)[1].split("},[loadStatus,loadPresets,loadOps,loadRecords,tab])", 1)[0]
         self.assertNotIn("loadTrace()", initial)
+        self.assertNotIn("loadRecords()", initial.split("const id=setInterval", 1)[0])
+        self.assertIn("if(tab==='records')loadRecords().catch", initial)
         self.assertNotIn("loadAudit()", initial)
 
     def test_api_requires_management_token(self) -> None:
@@ -199,8 +201,10 @@ class ManagementVisualConsistencyTests(unittest.TestCase):
     def test_result_labels_are_neutral_and_numbers_use_status_colors(self) -> None:
         # Labels inherit the ordinary caption color; only the numerical value
         # receives semantic status coloring, including when value is zero.
-        self.assertIn("v:String(s.failed||0),tone:'ka-err'", self.app)
-        self.assertIn("v:String(s.success||0),tone:'ka-ok'", self.app)
+        # Records center counts are neutral categories, not outcomes; those
+        # remain color-coded in the appropriate status-specific components.
+        self.assertIn("v:recordSummary.turns==null?'—':recordNumber(recordSummary.turns)", self.app)
+        self.assertIn("v:recordSummary.protected_runs==null?'—':recordNumber(recordSummary.protected_runs)", self.app)
         self.assertIn("v:String(data.summary?.errors||0),tone:'ka-err'", self.app)
         self.assertNotIn('labelTone', self.app)
         self.assertIn('h(\'span\',null,tr("ui.3e3c8068bb0e"))', self.app)

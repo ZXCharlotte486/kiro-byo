@@ -41,11 +41,36 @@ class AppPackageTests(unittest.TestCase):
         manifest = json.loads((ROOT / "app.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["name"], "kiro-byo")
         self.assertEqual(manifest["displayName"], "Kiro BYO")
-        self.assertEqual(manifest["version"], "0.2.5")
+        self.assertEqual(manifest["version"], "0.3.0")
         self.assertEqual(manifest["minKiroCrewVersion"], "0.11.0-rc.1")
         self.assertEqual(manifest["backend"]["hooks"]["routes"], "backend.routes:register_routes")
         self.assertEqual(manifest["ui"]["pages"][0]["route"], "/kiro-byo")
         self.assertEqual(manifest["platform"]["os"], ["macos", "linux", "windows"])
+
+
+    def test_store_card_has_explicit_opaque_icon(self) -> None:
+        import struct
+        manifest = json.loads((ROOT / "app.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["iconPath"], "assets/icon.png")
+        icon = ROOT / manifest["iconPath"]
+        self.assertTrue(icon.is_file())
+        raw = icon.read_bytes()
+        self.assertEqual(raw[:8], b"\x89PNG\r\n\x1a\n")
+        width, height, depth, color = struct.unpack(">IIBB", raw[16:26])
+        self.assertEqual((width, height, depth, color), (512, 512, 8, 2))
+        self.assertEqual(manifest["ui"]["pages"][0]["iconUrl"], "icon.svg")
+        self.assertTrue((ROOT / "ui/icon.svg").is_file())
+        # Supplied SSSP-BYO identity must be used by the app card,
+        # the Crew sidebar and BYO's own heading.
+        self.assertTrue((ROOT / "assets/logo_bw_text.png").is_file())
+        svg = (ROOT / "ui/icon.svg").read_text(encoding="utf-8")
+        self.assertIn('viewBox="0 0 746 324"', svg)
+        self.assertIn('data:image/png;base64,', svg)
+        self.assertIn('prefers-color-scheme:dark', svg)
+        ui = (ROOT / "ui/index.mjs").read_text(encoding="utf-8")
+        self.assertIn("h('img',{src:UI_ICON_URL,alt:'SSSP-BYO'})", ui)
+        self.assertIn("new URL('./icon.svg',import.meta.url).href", ui)
+        self.assertNotIn("h('div',{className:'ka-logo'},'K')", ui)
 
 
     def test_brand_rename_preserves_compatibility_identities(self) -> None:
@@ -206,7 +231,7 @@ class AppPackageTests(unittest.TestCase):
         manifest = json.loads((ROOT / "app.json").read_text(encoding="utf-8"))
         pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
         expected = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
-        self.assertEqual(expected, "0.2.5")
+        self.assertEqual(expected, "0.3.0")
         self.assertEqual(manifest["version"], expected)
         self.assertEqual(pyproject["project"]["version"], expected)
         self.assertEqual(__version__, expected)
@@ -862,7 +887,7 @@ class AppPackageTests(unittest.TestCase):
             module = importlib.util.module_from_spec(spec)
             sys.modules[spec.name] = module
             spec.loader.exec_module(module)
-            self.assertEqual(module._version(), "0.2.5")
+            self.assertEqual(module._version(), "0.3.0")
             self.assertTrue(callable(module.register_routes))
         finally:
             for name in list(sys.modules):
@@ -1146,7 +1171,9 @@ def test_provider_ui_render_regression_is_guarded() -> None:
 def test_integration_ui_surfaces_source_audit() -> None:
     ui = (ROOT / "ui/index.mjs").read_text(encoding="utf-8")
     assert "Source audit" in ui
-    assert "i.verified_through" in ui
+    assert "i.source_contract_status" in ui
+    assert "i.source_contract_checked_version" in ui
+    assert "i.version_audited" in ui
 
 
 def test_records_ui_keeps_raw_runtime_trace_behind_details_without_replacing_metadata_telemetry() -> None:

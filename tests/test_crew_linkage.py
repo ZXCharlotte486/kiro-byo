@@ -343,9 +343,14 @@ def test_type_selection_allowed_for_schedule_and_background(live_linkage_routes,
     code, out = _result(asyncio.run(host.routes.update_background_model(host.request({"model": type_id}), None)))
     assert code == 200 and out["background"]["model"] == type_id
     req = host.request({"model": type_id})
+    stored_job = SimpleNamespace(id="example", model="", script="", command="")
     async def jobs(**kwargs):
-        return [SimpleNamespace(id="example", script="", command="")]
+        return [stored_job]
+    async def update(job_id, *, model):
+        stored_job.model = model
+        return stored_job
     req.app["state"].crons.list_jobs_async = jobs
+    req.app["state"].crons.update_job_async = update
     code, out = _result(asyncio.run(host.routes.update_task_model(req, None)))
     assert code == 200 and out["task"]["model"] == type_id
 

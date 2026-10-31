@@ -27,25 +27,21 @@ def test_mode_registry_keeps_stable_builtin_identifiers():
     assert tiga.resolve_type("multi") == resolve_policy("tiga", "multi")[1]
 
 
-def test_dyna_preview_is_discoverable_but_unexecutable_through_any_entry():
+def test_dyna_registered_executable_in_product_order_with_flash_as_default():
     registry = load_mode_registry()
     dyna = registry.get("dyna")
-    assert dyna is not None
-    assert dyna.type_ids == ("flash", "strong", "miracle")
-    assert dyna.enabled is False
+    assert dyna is not None and dyna.enabled
+    assert dyna.type_ids == ("miracle", "flash", "strong")
+    assert dyna.pack.default_policy == "flash"
+    assert registry.default().id == "tiga"
     for candidate in dyna.type_ids:
-        with pytest.raises(PolicyPackError, match="not available yet"):
-            dyna.resolve_type(candidate)
-        with pytest.raises(PolicyPackError, match="not available yet"):
-            registry.resolve("dyna", candidate)
-        with pytest.raises(PolicyPackError, match="not available yet"):
-            resolve_policy("dyna", candidate)
+        assert dyna.resolve_type(candidate).id == candidate
+        assert registry.resolve("dyna", candidate)[1].id == candidate
     public = public_policy_packs()
     assert public["mode_registry_api_version"] == 1
     assert public["mode_plugin_kind"] == "data-only-policy-pack"
     row = next(item for item in public["packs"] if item["id"] == "dyna")
-    assert row["enabled"] is False
-    assert row["status"] == "coming_soon"
+    assert row["enabled"] is True and row["status"] == "available"
 
 
 def test_unknown_mode_type_and_uninstalled_mode_fail_closed():
@@ -96,7 +92,7 @@ def test_dyna_id_remains_reserved_against_user_override(tmp_path):
             }}],
         }), encoding="utf-8")
         registry = load_mode_registry()
-        assert registry.get("dyna").enabled is False
+        assert registry.get("dyna").enabled is True
         assert any("reserved" in e["error"] for e in registry.errors)
 
 

@@ -276,13 +276,29 @@ class NativeToolRuntime:
             "code_intelligence": self._code.status(),
         }
 
-    def tool_specs(self, names: set[str] | None = None) -> list[dict[str, Any]]:
+    def tool_specs(
+        self, names: set[str] | None = None, *, ui_language: str = "auto",
+    ) -> list[dict[str, Any]]:
         selected = None if names is None else {self.canonical_name(name) for name in names}
-        return [
+        tools = [
             spec.to_tool_spec()
             for spec in self.specs()
             if selected is None or spec.name in selected
         ]
+        # Tool schemas may vary by the session's UI language, without changing
+        # tool identity or the runtime's canonical schema/validation rules.
+        from .tool_display import display_locale
+        from .i18n import locale_messages
+        try:
+            hint = locale_messages(display_locale(ui_language)).get("tool.description.hint", "")
+        except (OSError, ValueError):
+            hint = ""
+        if hint:
+            for tool in tools:
+                props = tool["function"]["parameters"].get("properties", {})
+                if "description" in props:
+                    props["description"] = {**props["description"], "description": hint}
+        return tools
 
     @staticmethod
     def canonical_name(name: str) -> str:
@@ -316,6 +332,10 @@ class NativeToolRuntime:
             raise ToolValidationError(f"unexpected argument(s): {', '.join(extra)}")
 
         normalized = dict(arguments)
+        if "description" in normalized:
+            desc = normalized["description"]
+            if not isinstance(desc, str) or len(desc) > 160:
+                raise ToolValidationError("description must be text with at most 160 characters")
         if canonical == "read":
             self._require_nonempty_string(normalized, "path")
             normalized["offset"] = self._bounded_int(normalized.get("offset", 1), "offset", 1, 2_000_000_000)

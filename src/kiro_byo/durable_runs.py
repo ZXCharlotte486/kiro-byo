@@ -67,9 +67,27 @@ class DurableRunStore:
 
     @staticmethod
     def public_record(record: Mapping[str, Any]) -> dict[str, Any]:
-        """Project a durable run without exposing its fencing credential."""
-        safe = dict(record)
-        lease = safe.get("lease")
+        """Return a small, allowlisted diagnostic view, never a ledger snapshot.
+
+        Stored steps, tool receipts, checkpoints and arbitrary metadata may
+        contain user input, tool arguments or credentials. Recovery decisions
+        must always use the private canonical record, not this projection.
+        """
+        keys = (
+            "schema_version", "revision", "run_id", "session_id", "plan_id",
+            "mode", "selection", "status", "created_at", "updated_at",
+            "completed_at", "session_event_seq", "recovery_state",
+            "side_effect_seen", "retry_count", "resume_count", "replan_count",
+            "last_recovery_action",
+        )
+        safe = {key: record[key] for key in keys if key in record}
+        metadata = record.get("metadata")
+        # The Records UI displays this identifier. Do not publish any other
+        # arbitrary metadata: paths, prompts and credential-like data can live there.
+        safe["metadata"] = {
+            "model_id": str(metadata.get("model_id") or "")[:256]
+        } if isinstance(metadata, Mapping) else {}
+        lease = record.get("lease")
         if isinstance(lease, Mapping):
             safe["lease"] = {
                 "generation": int(lease.get("generation") or 0),
@@ -575,7 +593,19 @@ class DurableRunStore:
         # caps one response at 500 to avoid an unbounded ACP payload.
         return self.list(limit=500, session_id=session_id, include_terminal=False)
 
+    @staticmethod
+    def _safe_to_clear(record: Mapping[str, Any]) -> bool:
+        """Only unambiguously finished runs can lose their recovery evidence."""
+        return (
+            record.get("status") == "completed"
+            and str(record.get("recovery_state") or "") not in {
+                "unknown_side_effect", "manual_verification_required", "unsafe"
+            }
+            and not DurableRunStore.is_lease_active(record)
+        )
+
     def clear(self) -> int:
+        """Clear completed safe history; never erase a resumable/unsafe Run."""
         removed = 0
         with self._lock:
             if not self.root.exists():
@@ -583,10 +613,13 @@ class DurableRunStore:
             for path in self.root.glob("*.json"):
                 try:
                     with _file_transaction_lock(path):
-                        path.unlink(missing_ok=True)
+                        record = json.loads(path.read_text(encoding="utf-8"))
+                        if not isinstance(record, dict) or not self._safe_to_clear(record):
+                            continue
+                        path.unlink()
                         removed += 1
-                except OSError:
-                    pass
+                except (OSError, ValueError, TypeError):
+                    continue
         return removed
 
     def _prune_locked(self) -> None:
@@ -609,7 +642,7 @@ class DurableRunStore:
             try:
                 with _file_transaction_lock(path):
                     record = json.loads(path.read_text(encoding="utf-8"))
-                    if not isinstance(record, dict) or record.get("status") != "completed":
+                    if not isinstance(record, dict) or not self._safe_to_clear(record):
                         continue
                     path.unlink()
                     overflow -= 1

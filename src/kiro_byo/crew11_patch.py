@@ -5,8 +5,10 @@ and split session/load and member backend selection. Never recycle the 0.10
 patcher against that different source. Every touched seam is independently
 validated and the installer stages/compiles the whole set before writing.
 
-Mate Worker Kit deliberately remains KAS-only until actual projection of the
-worker's excludedTools has been verified end-to-end for BYO.
+This candidate registers BYO for Mate Worker Kit when its projection seam
+matches the RC1 source contract. Live Windows Worker execution and tool-scope
+end-to-end verification remain pending; the installer still fails closed on
+unknown upstream source layouts.
 """
 from __future__ import annotations
 
@@ -23,6 +25,9 @@ _OWNER_MEMBERS = _P+'members_parts/member_sessions.py'
 _OWNER_LOAD = _P+'acp/runtime_session_load.py'
 _HANDLERS = _P+'dashboard/chat_handlers.py'
 _LOADER_BUILDERS = _P+'config/loader_builders.py'
+# Crew 0.11 split the turn clock and completion footer out of chat_runner.py.
+_DISPATCH_CLOCK = _P+'dashboard/chat_turn/turn_dispatch_gates.py'
+_TURN_FOOTER = _P+'dashboard/chat_turn/turn_stats.py'
 
 _CAPABILITIES = {
     'backends_mcp.py': (
@@ -55,6 +60,7 @@ TARGET_FILES = (
     _P+'dashboard/handlers/agents.py',
     _P+'dashboard/chat_api/slot_effort.py',_HANDLERS,
     _P+'dashboard/chat_title.py',
+    _DISPATCH_CLOCK, _TURN_FOOTER,
 )
 
 
@@ -129,8 +135,6 @@ def _loader_builders(text: str) -> str:
     """
     marker = '# Kiro BYO: implicit member harness follows the BYO main harness.'
     strict = '# Kiro BYO: enforce BYO member backend while main BYO is active.'
-    if strict in text:
-        return text
     old = ("    value = backend_from_stored(agent_data.get(key))\n"
            "    if value is None:\n"
            "        default = section.default(key)\n"
@@ -154,6 +158,12 @@ def _loader_builders(text: str) -> str:
            "    if value is None:\n"
            "        default = section.default(key)\n"
            "        value = default if default in selectable_backends() else None\n")
+    # An installed guard must remain complete. A marker alone is not proof
+    # that the effective member backend cannot silently return to KAS/CLI.
+    if strict in text:
+        if text.count(strict) != 1 or text.count(new) != 1:
+            raise PatchError('0.11 BYO member default guard is incomplete or modified')
+        return text
     if text.count(prior) == 1:
         return text.replace(prior, new, 1)
     import_anchor = '        ACP_BACKEND_KIRO,\n        backend_from_stored,'
@@ -182,6 +192,65 @@ def _handlers(text: str) -> str:
     return text
 
 
+def _ensure_runtime_capability_import(text: str) -> str:
+    """Import at runtime: the 0.11 turn_stats TYPE_CHECKING import is inert."""
+    statement = "from kiro_crew.agent_sdk.capabilities import capabilities_of\n"
+    if statement in text:
+        return text
+    future = "from __future__ import annotations\n"
+    if text.count(future) != 1:
+        raise PatchError("0.11 turn owner future-import contract changed")
+    return text.replace(future, future + statement, 1)
+
+
+def _patch_dispatch_clock(text: str) -> str:
+    """Retain the initial turn clock for BYO; other Crew backends are untouched.
+
+    The 0.11 chat runner stores the original clock on the per-turn object in
+    turn_entry.py. The dispatch gates reset that clock after substantial setup.
+    This hook is deliberately anchored in the owning 0.11 module, not the old
+    shared chat_runner.py patch used on 0.10.
+    """
+    marker = "# Kiro BYO: retain the initial turn clock across dispatch setup."
+    if marker in text:
+        return text
+    anchor = "    _turn_t0 = time.monotonic()\n    turn._turn_t0 = _turn_t0\n"
+    if text.count(anchor) != 1 or "async def _turn_dispatch_gates(" not in text:
+        raise PatchError("0.11 dispatch turn clock contract changed")
+    text = _ensure_runtime_capability_import(text)
+    replacement = (
+        "    " + marker + "\n"
+        "    if capabilities_of(client).backend != \"kiro-byo\":\n"
+        "        _turn_t0 = time.monotonic()\n"
+        "        turn._turn_t0 = _turn_t0\n"
+    )
+    return text.replace(anchor, replacement, 1)
+
+
+def _patch_turn_footer(text: str) -> str:
+    """Report Crew-side monotonic elapsed time for BYO, not provider latency.
+
+    The elapsed field in 0.11 lives in turn_stats._on_complete, and previously
+    prefers nonzero provider usage.duration_ms. That is not a user Turn clock.
+    Keep the upstream-reported duration for every official backend unchanged.
+    """
+    marker = "# Kiro BYO: footer elapsed is turn wall time, not provider duration."
+    if marker in text:
+        return text
+    anchor = "        _turn_elapsed_ms = int(_u.duration_ms or (time.monotonic() - _turn_t0) * 1000)\n"
+    if text.count(anchor) != 1 or "async def _on_complete(" not in text:
+        raise PatchError("0.11 turn stats footer contract changed")
+    text = _ensure_runtime_capability_import(text)
+    replacement = (
+        "        " + marker + "\n"
+        "        if capabilities_of(client).backend == \"kiro-byo\":\n"
+        "            _turn_elapsed_ms = max(0, int((time.monotonic() - _turn_t0) * 1000))\n"
+        "        else:\n"
+        "            _turn_elapsed_ms = int(_u.duration_ms or (time.monotonic() - _turn_t0) * 1000)\n"
+    )
+    return text.replace(anchor, replacement, 1)
+
+
 def patch_text(relative: str, text: str) -> str:
     rel=relative.replace('\\','/')
     if rel==_CORE: patched=_core(text)
@@ -194,6 +263,8 @@ def patch_text(relative: str, text: str) -> str:
     elif rel==_HANDLERS: patched=_handlers(text)
     elif rel==_P+'dashboard/chat_api/slot_effort.py': patched=legacy._patch_slot_effort(text)
     elif rel==_P+'dashboard/chat_title.py': patched=legacy._patch_chat_title(text)
+    elif rel==_DISPATCH_CLOCK: patched=_patch_dispatch_clock(text)
+    elif rel==_TURN_FOOTER: patched=_patch_turn_footer(text)
     elif rel in shared._PATCHERS: patched=shared.patch_text(rel,text)
     else: raise PatchError(f'no Crew 0.11 transform for {rel}')
     c._parse(patched)
@@ -263,6 +334,36 @@ def _previous_member_capability_installation(text: str, rendered: str) -> bool:
         return False
 
 
+# Reconstruct the exact BYO-owned 0.2.5 catalogue helper before this fix.
+# Old installed Crew sources use that helper; recognizing its exact AST lets
+# the installer upgrade it transactionally without weakening foreign-edit checks.
+_PREVIOUS_AGENTS_MODEL_HELPER = c._KIRO_BYO_MODEL_HELPER.replace(
+    "    if _catalog_error:\n        namespace = model_registry_namespace(ACP_BACKEND_KIRO_BYO)\n",
+    "    if not model_rows or not type_rows:\n        namespace = model_registry_namespace(ACP_BACKEND_KIRO_BYO)\n",
+    1,
+).replace(
+    "    # configured_default belongs to the Crew host config, not necessarily\n"
+    "    # to the active BYO Provider catalogue.  Never launder a stale KAS/CLI\n"
+    "    # model pin back into the selectable BYO model list.\n",
+    "    default = (configured_default or \"\").strip()\n"
+    "    if default and _normalize_model_key(default) != \"auto\" and not default.startswith(\"kiro-byo-type:\"):\n"
+    "        return [\n"
+    "            {\n"
+    "                \"model_name\": default,\n"
+    "                \"display_name\": default,\n"
+    "                \"description\": \"Configured default\",\n"
+    "                \"context_window\": model_registry.model_window(default) or 0,\n"
+    "            }\n"
+    "        ]\n",
+    1,
+).replace(
+    "    # ACP advertisement is a recovery path ONLY if reading BYO's catalogue\n"
+    "    # failed.  A successfully read empty provider list is authoritative; old\n"
+    "    # session advertisements must not resurrect models after a provider removal.\n",
+    "",
+    1,
+)
+
 # The earlier 0.2.5 builds used this *owned* member-backend display helper.
 # It was replaced when fail-closed member execution routing was added.  Older
 # installs may therefore be valid but no longer byte-identical to this build.
@@ -290,7 +391,7 @@ def _previous_owned_agents_installation(text: str, rendered: str) -> bool:
 
     rel = _P + 'dashboard/handlers/agents.py'
     helpers = {
-        '_kiro_byo_models': (c._KIRO_BYO_MODEL_HELPER,),
+        '_kiro_byo_models': (_PREVIOUS_AGENTS_MODEL_HELPER, c._KIRO_BYO_MODEL_HELPER,),
         '_kiro_byo_effective_member_backend': (
             _PREVIOUS_AGENTS_MEMBER_BACKEND_HELPER,
             c._KIRO_BYO_EFFECTIVE_MEMBER_BACKEND_HELPER,

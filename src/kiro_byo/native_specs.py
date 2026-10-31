@@ -9,6 +9,7 @@ contract layer.
 from __future__ import annotations
 
 import json
+import copy
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -92,13 +93,35 @@ class NativeToolSpec:
     acp_kind: str
     capability: str
 
+    def __post_init__(self) -> None:
+        # Native tool calls may carry an optional per-operation explanation for
+        # KiroCrew's activity history.  It is not an executable parameter or an
+        # authorization signal.  Keep the advertised schema and validation in
+        # agreement, without changing any required or existing tool fields.
+        if self.name == "update_plan":
+            return
+        schema = dict(self.input_schema)
+        properties = dict(schema.get("properties", {}))
+        properties["description"] = {
+            "type": "string",
+            "maxLength": 160,
+            "description": (
+                "Optional short, plain-language description of THIS operation for "
+                "the activity history. Use the BYO interface language, not "
+                "necessarily the answer language. Do not include the command, "
+                "credentials, secrets or URLs. Display only; never affects execution."
+            ),
+        }
+        schema["properties"] = properties
+        object.__setattr__(self, "input_schema", schema)
+
     def to_tool_spec(self) -> dict[str, Any]:
         return {
             "type": "function",
             "function": {
                 "name": self.name,
                 "description": self.description,
-                "parameters": self.input_schema,
+                "parameters": copy.deepcopy(self.input_schema),
             },
         }
 

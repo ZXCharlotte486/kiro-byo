@@ -61,7 +61,7 @@ MODEL_ECHO = "kiro-byo/echo"
 MODEL_UPPER = "kiro-byo/echo-uppercase"
 
 AGENT_NAME = "Kiro BYO"
-AGENT_VERSION = "0.2.5"
+AGENT_VERSION = "0.3.0"
 
 MODEL_CONFIG_ID = "model"
 THINKING_CONFIG_ID = "thinkingMode"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check a REAL Crew 0.11.0-rc.1 source checkout without modifying it.
+"""Read-only semantic preflight against the installed Crew 0.11 RC source.
 
 An adapter is installable only when every upstream seam and import anchor is
 recognized and the proposed generated source compiles. This does not prove
@@ -16,6 +16,7 @@ from kiro_byo.integration_manager import (
     _converge_semantic_transform,
     _normalized_text,
     _transformer_for,
+    _crew11_semantic_candidate,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,8 +28,8 @@ def preflight(crew_package: Path, version: str) -> dict:
     issues = []
     if not crew_package.is_dir():
         issues.append("Crew src/kiro_crew directory not found")
-    if version not in {"0.11.0-rc.1", "0.11.0rc1"}:
-        issues.append("Only pinned KiroCrew 0.11.0-rc.1 accepted")
+    if version not in {"0.11.0-rc.1", "0.11.0rc1"} and not _crew11_semantic_candidate(version):
+        issues.append("Only audited 0.11.0-rc.1, guarded 0.11.0-rc.2+ / 0.11.1-rc.1+, or exact 0.11.0 / 0.11.1 source-contract candidates accepted")
     manifest = json.loads((ADAPTER / "manifest.json").read_text(encoding="utf-8"))
     compat = json.loads((ADAPTER / "compatibility.json").read_text(encoding="utf-8"))
     if not issues:
@@ -48,12 +49,23 @@ def preflight(crew_package: Path, version: str) -> dict:
                     compile(proposed, relative, "exec")
                 except Exception as exc:
                     issues.append(f"{relative}: {type(exc).__name__}: {exc}")
+    is_audited = version in {"0.11.0-rc.1", "0.11.0rc1"}
     return {
         "target": version,
         "adapter": "v0.11-rc1",
         "eligible_to_attempt_install": not issues,
         "source_audited_by_maintainer": False,
-        "exact_rc1_source_pins_match": bool(not issues and compat.get("pinned_source_sha256")),
+        "exact_rc1_source_pins_match": bool(
+            not issues and is_audited and all(
+                (crew_package / rel[len(PREFIX):]).is_file() and
+                __import__("hashlib").sha256(
+                    (crew_package / rel[len(PREFIX):]).read_text(encoding="utf-8-sig")
+                    .replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
+                ).hexdigest() in pins.values()
+                for rel, pins in compat.get("pinned_source_sha256", {}).items()
+            )
+        ),
+        "provisional_source_checked": bool(not issues and not is_audited),
         "pinned_seams_checked": len(compat.get("pinned_source_sha256", {})),
         "mate_worker_kit_supported": bool(not issues),
         "desktop_e2e_verified": False,

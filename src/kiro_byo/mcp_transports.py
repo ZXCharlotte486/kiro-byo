@@ -38,6 +38,14 @@ class McpProtocolError(McpError):
     """The remote endpoint answered, but not with a usable MCP response."""
 
 
+class McpInputRequired(McpProtocolError):
+    """A dispatched MCP call requires client interaction that Crew cannot project.
+
+    The remote tool may already have acted.  This is NOT a pre-dispatch
+    rejection or an invitation to automatically replay the tool call.
+    """
+
+
 class McpJsonRpcError(McpProtocolError):
     """A peer returned a structured JSON-RPC error response."""
 
@@ -171,7 +179,7 @@ class StdioMcpServer:
     def _logical_modern_result(result: dict[str, Any]) -> dict[str, Any]:
         result_type = result.get("resultType")
         if result_type == "input_required":
-            raise McpProtocolError(
+            raise McpInputRequired(
                 "MCP 2026-07-28 tool requested multi-round-trip client input; "
                 "Kiro BYO does not yet expose MRTR elicitation/sampling/roots to Crew"
             )
@@ -1011,7 +1019,7 @@ class HttpMcpServer:
             # 0.9.10 does not yet project MCP elicitation/sampling/roots requests
             # through Crew. Refuse explicitly rather than pretending the tool
             # completed or dropping the server's request for user/client input.
-            raise McpProtocolError(
+            raise McpInputRequired(
                 "MCP 2026-07-28 tool requested multi-round-trip client input; "
                 "Kiro BYO does not yet expose MRTR elicitation/sampling/roots to Crew"
             )

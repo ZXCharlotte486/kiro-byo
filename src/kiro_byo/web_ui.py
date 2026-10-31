@@ -282,11 +282,15 @@ class _Handler(BaseHTTPRequestHandler):
             except ValueError:
                 limit = 100
             session_id = str((query.get("session_id") or [""])[0]).strip()
+            event = str((query.get("event") or [""])[0]).strip()
+            if len(event) > 128:
+                self._json(HTTPStatus.BAD_REQUEST, {"error": "event filter is too long"})
+                return
             self._json(
                 HTTPStatus.OK,
                 {
                     "status": self.server.runtime_trace.status(),
-                    "events": self.server.runtime_trace.recent(limit, session_id=session_id),
+                    "events": self.server.runtime_trace.recent(limit, session_id=session_id, event=event),
                 },
             )
             return
@@ -364,8 +368,8 @@ class _Handler(BaseHTTPRequestHandler):
             path = urllib.parse.urlsplit(self.path).path
             if path == "/api/diagnostics":
                 removed = self.server.telemetry.clear()
-                removed_trace = self.server.runtime_trace.clear()
-                self._json(HTTPStatus.OK, {"cleared": True, "removed": removed, "removed_trace": removed_trace})
+                # Runtime Trace is independent from request telemetry.
+                self._json(HTTPStatus.OK, {"cleared": True, "removed": removed, "removed_trace": 0})
                 return
             if path == "/api/runtime-trace":
                 self._json(HTTPStatus.OK, {"cleared": True, "removed": self.server.runtime_trace.clear()})
