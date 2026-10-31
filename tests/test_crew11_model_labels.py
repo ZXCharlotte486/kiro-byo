@@ -16,8 +16,8 @@ def _dashboard(tmp_path: Path, *, code: str = 'data-model-id composer-model-chip
     package = tmp_path / 'kiro_crew'
     dist = package / 'static/dist'
     (dist / 'assets').mkdir(parents=True)
-    (dist / 'index.html').write_text('<!doctype html><html><head></head><body>crew</body></html>')
-    (dist / 'assets/hashed-file.js').write_text(code)
+    (dist / 'index.html').write_text('<!doctype html><html><head></head><body>crew</body></html>', encoding='utf-8')
+    (dist / 'assets/hashed-file.js').write_text(code, encoding='utf-8')
     return package
 
 
@@ -52,7 +52,7 @@ def test_discovery_is_idempotent_and_keeps_hashed_assets_untouched(tmp_path):
     assert first.changed and first.path.name == 'index.html'
     assert first.patched.count(fix.START) == 1
     assert first.patched.count(fix.END) == 1
-    first.path.write_text(first.patched)
+    first.path.write_text(first.patched, encoding='utf-8')
     second = fix.discover_dashboard_patches(package)[0]
     assert not second.changed
     assert second.patched == first.patched
@@ -62,7 +62,7 @@ def test_discovery_is_idempotent_and_keeps_hashed_assets_untouched(tmp_path):
 def test_upgrade_replaces_owned_guard_and_does_not_duplicate(tmp_path):
     package = _dashboard(tmp_path)
     first = fix.discover_dashboard_patches(package)[0]
-    first.path.write_text(first.patched.replace('Sky Type','Sky Alpha'))
+    first.path.write_text(first.patched.replace('Sky Type','Sky Alpha'), encoding='utf-8')
     upgraded = fix.discover_dashboard_patches(package)[0]
     assert upgraded.changed
     assert upgraded.patched.count(fix.START) == 1
@@ -82,7 +82,7 @@ def test_unknown_compiled_dom_contract_fails_closed(tmp_path, code):
 def test_bad_marker_fails_closed(tmp_path):
     package = _dashboard(tmp_path)
     index = package/'static/dist/index.html'
-    index.write_text('<head>' + fix.START + '</head>')
+    index.write_text('<head>' + fix.START + '</head>', encoding='utf-8')
     with pytest.raises(DashboardPatchError, match='incomplete or duplicated'):
         fix.discover_dashboard_patches(package)
 
@@ -91,7 +91,7 @@ def test_browser_script_syntax_is_valid(tmp_path):
     shell = fix.block()
     js = re.search(r'<script[^>]*>(.*?)</script>', shell, re.S).group(1)
     path = tmp_path/'labels.js'
-    path.write_text(js)
+    path.write_text(js, encoding='utf-8')
     r = subprocess.run(['node','--check',str(path)], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
 
@@ -111,7 +111,7 @@ def test_executable_dom_model_labels_and_selection_identity(tmp_path):
     shell = fix.block()
     js = re.search(r'<script[^>]*>(.*?)</script>', shell, re.S).group(1)
     js_path = tmp_path/'labels.js'
-    js_path.write_text(js)
+    js_path.write_text(js, encoding='utf-8')
     harness = r'''
 const vm = require('vm');
 const fs = require('fs');
@@ -148,7 +148,7 @@ if(status.nodeValue!=='Tiga · Sky Type')throw Error('bottom status');
 if(attrs.title!=='模型：Tiga · Sky Type' || attrs['aria-label']!=='模型：Tiga · Sky Type')throw Error('accessible label');
 '''
     harness_path = tmp_path/'dom-test.cjs'
-    harness_path.write_text(harness)
+    harness_path.write_text(harness, encoding='utf-8')
     ran = subprocess.run(['node',str(harness_path),str(js_path)], capture_output=True,text=True)
     assert ran.returncode == 0, ran.stderr
 
@@ -158,7 +158,7 @@ def test_real_crew11_picker_and_settings_dom_seams(tmp_path):
     shell = fix.block()
     script = re.search(r'<script[^>]*>(.*?)</script>', shell, re.S).group(1)
     script_path = tmp_path / 'display.js'
-    script_path.write_text(script)
+    script_path.write_text(script, encoding='utf-8')
     fixture = Path(__file__).with_name('fixtures') / 'crew11_picker_settings_fixture.cjs'
     r = subprocess.run(['node',str(fixture),str(script_path)],capture_output=True,text=True)
     assert r.returncode == 0, r.stderr
@@ -170,7 +170,7 @@ def test_mate_model_picker_short_labels_and_wire_identity(tmp_path):
     shell = fix.block()
     script = re.search(r'<script[^>]*>(.*?)</script>', shell, re.S).group(1)
     js_path = tmp_path / 'mate-display.js'
-    js_path.write_text(script)
+    js_path.write_text(script, encoding='utf-8')
     fixture = Path(__file__).with_name('fixtures') / 'crew11_mate_model_fixture.cjs'
     result = subprocess.run(['node', str(fixture), str(js_path)], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
