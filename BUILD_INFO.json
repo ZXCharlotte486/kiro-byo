@@ -1,5 +1,5 @@
 {
-  "build_id": "0.3.0+d0b3e0e9509e9857",
+  "build_id": "0.3.0+dc0b9dee481b0513",
   "candidate_label": "0.3.0-v17-user-sssp-byo-icon-only-crew-0111rc2-preflight-e2e-pending",
   "crew_candidate": "v0.11.0-rc.2+, v0.11.0, v0.11.1-rc.1+ and v0.11.1 (provisional strict source-contract preflight)",
   "crew_candidate_commit": "v0.11.1-rc.2_tag_a27d362_observed_upstream_not_fully_source_audited",
@@ -12,7 +12,7 @@
     "windows": "not_verified"
   },
   "product": "Kiro BYO",
-  "runtime_sha256": "d0b3e0e9509e98576c4cf237f3851ca94f659dc83e1478bb230f557dd7cfefa0",
+  "runtime_sha256": "dc0b9dee481b0513d67d6081c17e8741385f3a0f26ca12177fe9d758290934e9",
   "version": "0.3.0",
   "windows_e2e": "not_verified"
 }
