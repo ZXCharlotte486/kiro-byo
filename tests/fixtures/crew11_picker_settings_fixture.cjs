@@ -29,7 +29,8 @@ function widget(wireName, role='option') {
   row.parentElement=null;
   return {row,span,txt};
 }
-function run(mode) {
+function run(mode, lateMount=false) {
+  let mounted=!lateMount;
   const auto=widget('auto');
   const sky=widget('kiro-byo-type:tiga:sky');
   const multi=widget(wire);
@@ -62,9 +63,9 @@ function run(mode) {
     addEventListener:(n,fn)=>callbacks[n]=fn,
     querySelector:s=>s==='[data-testid="composer-model-chip"]' && mode==='chat'?chip:null,
     querySelectorAll:s=>{
-      if(s==='[data-model-id^="kiro-byo-type:"]') return [sky.span,multi.span];
-      if(s==='button[role="option"] [data-model-id^="kiro-byo-type:"]') return [sky.span,multi.span];
-      if(s.startsWith('[data-kiro-byo-crew11-auto]')) return items.map(x=>x.row).filter(row=>row.hasAttribute('data-kiro-byo-crew11-auto')||row.hasAttribute('data-kiro-byo-crew11-type-first')||row.hasAttribute('data-kiro-byo-crew11-model-first'));
+      if(s==='[data-model-id^="kiro-byo-type:"]') return mounted?[sky.span,multi.span]:[];
+      if(s==='button[role="option"] [data-model-id^="kiro-byo-type:"]') return mounted?[sky.span,multi.span]:[];
+      if(s.startsWith('[data-kiro-byo-crew11-auto]')) return !mounted?[]:items.map(x=>x.row).filter(row=>row.hasAttribute('data-kiro-byo-crew11-auto')||row.hasAttribute('data-kiro-byo-crew11-type-first')||row.hasAttribute('data-kiro-byo-crew11-model-first'));
       if(s==='[data-setting-label]') return [defaultField,selectField];
       if(s==='[role="group"][aria-label]') return [multiGroup];
       if(s==='[role="listbox"] [role="option"]') return portalRows;
@@ -77,6 +78,17 @@ function run(mode) {
     }
   };
   vm.runInNewContext(code,{document, NodeFilter:{SHOW_TEXT:4}, MutationObserver:class {constructor(fn){observed=fn} observe(){}}, window:{requestAnimationFrame:fn=>fn()}},{timeout:3000});
+  if(lateMount) {
+    // RC3 can render human-friendly Type text from the start. The wire id
+    // survives only in data-model-id, not in the newly mounted textContent.
+    sky.txt.nodeValue='Sky Type';
+    multi.txt.nodeValue='Multi Type';
+    mounted=true;
+    const newMenu={nodeType:1,textContent:'Sky Type Multi Type',
+      matches:()=>false,
+      querySelector:s=>s==='[data-model-id^="kiro-byo-type:"]'?sky.span:null};
+    observed([{type:'childList',addedNodes:[newMenu]}]);
+  }
   assert.equal(sky.txt.nodeValue,'Sky Type');
   assert.equal(multi.txt.nodeValue,'Multi Type');
   assert.equal(multi.span.getAttribute('data-model-id'),wire);
@@ -87,6 +99,7 @@ function run(mode) {
     assert.equal(auto.row.getAttribute('data-kiro-byo-crew11-auto'),'1');
     assert.ok(auto.row.hasAttribute('inert'));
     assert.equal(sky.row.getAttribute('data-kiro-byo-crew11-type-first'),'1');
+    assert.equal(sky.row.getAttribute('data-kiro-byo-crew11-group-label'), '形态 · 默认复合型，可手动切换');
     assert.equal(model.row.getAttribute('data-kiro-byo-crew11-model-first'),'1');
     assert.equal(chipText.nodeValue,'Tiga · Multi Type');
   } else {
@@ -106,5 +119,5 @@ function run(mode) {
   assert.equal(model.span.getAttribute('data-model-id'),'mimo-v2.6-flash');
   assert.equal(auto.span.getAttribute('data-model-id'),'auto');
 }
-run('chat');run('settings');
+run('chat');run('settings');run('chat',true);
 console.log('chat grouping / auto isolation / settings labeling / wire identity OK');

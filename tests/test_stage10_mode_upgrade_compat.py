@@ -68,15 +68,14 @@ def test_explicit_disable_allows_breaking_type_migration(tmp_path):
         assert resolve_policy("aurora", "flash")[1].id == "flash"
 
 
-def test_reserved_dyna_preview_remains_unexecutable_during_custom_upgrade(tmp_path):
+def test_builtin_dyna_ignores_user_upgrade_and_remains_executable(tmp_path):
     with use_app_home(tmp_path):
         install_or_update_mode(_mode())
         install_or_update_mode(_mode("1.1.0", quality=0.3))
         registry = load_mode_registry()
         assert registry.get("tiga").type_ids == ("sky", "multi", "power", "glitter")
-        assert registry.get("dyna").enabled is False
-        with pytest.raises(Exception, match="not available yet"):
-            resolve_policy("dyna", "flash")
+        assert registry.get("dyna").enabled is True
+        assert resolve_policy("dyna", "flash")[1].id == "flash"
 
 
 def test_four_tiga_types_route_through_shared_harness_without_provider_calls(tmp_path):
@@ -108,5 +107,4 @@ def test_four_tiga_types_route_through_shared_harness_without_provider_calls(tmp
             assert decision is not None
             assert (decision.pack, decision.policy) == ("tiga", type_id)
             assert build_execution_plan(decision) is not None
-        with pytest.raises(Exception, match="not available yet"):
-            route_model(config, pack="dyna", policy="flash", prompt="hello", history=[], has_image=False)
+        assert route_model(config, pack="dyna", policy="flash", prompt="hello", history=[], has_image=False) is not None

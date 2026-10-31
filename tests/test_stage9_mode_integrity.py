@@ -58,10 +58,9 @@ def test_builtin_mode_declarations_and_type_selections_work(tmp_path):
             pack, policy = resolve_policy('tiga', type_id)
             assert pack.id == 'tiga' and policy.id == type_id
         dyna = registry.get('dyna')
-        assert dyna is not None and not dyna.enabled
-        assert dyna.type_ids == ('flash', 'strong', 'miracle')
-        with pytest.raises(Exception, match='not available yet'):
-            resolve_policy('dyna', 'flash')
+        assert dyna is not None and dyna.enabled
+        assert dyna.type_ids == ('miracle', 'flash', 'strong')
+        assert resolve_policy('dyna', 'flash')[1].id == 'flash' 
 
 
 def test_public_mode_capability_flags_do_not_claim_executable_hotswap(tmp_path):
@@ -73,7 +72,7 @@ def test_public_mode_capability_flags_do_not_claim_executable_hotswap(tmp_path):
         by_id = {pack['id']: pack for pack in packs['packs']}
         assert by_id['tiga']['code_hot_swap'] is False
         assert by_id['tiga']['managed_upgrades'] is False
-        assert by_id['dyna']['status'] == 'coming_soon'
+        assert by_id['dyna']['status'] == 'available'
         install_or_update_mode(_pack())
         changed = {pack['id']: pack for pack in public_policy_packs()['packs']}
         assert changed['aurora']['managed_upgrades'] is True
@@ -96,7 +95,7 @@ def test_read_only_audit_script_reports_mode_contracts(tmp_path):
     by_id = {row['id']: row for row in payload['modes']}
     assert by_id['tiga']['type_ids'] == ['sky', 'multi', 'power', 'glitter']
     assert by_id['tiga']['contract_valid'] is True
-    assert by_id['dyna']['enabled'] is False
+    assert by_id['dyna']['enabled'] is True
     assert by_id['dyna']['contract_valid'] is True
 
 

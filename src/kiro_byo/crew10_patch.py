@@ -91,9 +91,11 @@ async def _kiro_byo_reconcile_slot_routing(state: DashboardState, slot: _ChatSlo
     composer keep displaying Jev even though the BYO catalogue is already
     active.
 
-    Reconcile only routing sentinels. Explicit concrete-model pins are never
-    overwritten. The operation is idempotent and broadcasts only when a slot
-    really changes.
+    Reconcile routing sentinels, including idle ACP sessions whose Type belongs
+    to a different Mode. Unlike a running turn, an idle live provider is NOT a
+    reason to keep a stale Mode. The host session must be safely reset before
+    exposing the new Type; never mutate only the UI/persisted slot selection.
+    Concrete-model pins and in-flight/linked sessions remain untouched.
     """
     targets = [slot] if slot is not None else list(state._slots.values())
     changed = False
@@ -119,24 +121,120 @@ async def _kiro_byo_reconcile_slot_routing(state: DashboardState, slot: _ChatSlo
             logger.warning("Kiro BYO slot routing reconciliation could not load default Type", exc_info=True)
         return _byo_default
 
+    async def _retire_idle_byo_session(
+        _slot: _ChatSlot, _expected: object, _target: str, _prior: str, _prior_jev: bool
+    ) -> bool:
+        """Use Crew's *native* model reset transaction, never an ad-hoc pop.
+
+        The old ACP session advertised Types from its creation Mode. Changing
+        its slot field without ending that session leaves actual execution on
+        the old Mode. Keep the same lock order and busy/subagent checks as
+        Crew's own single-slot model picker. No automatic changes for linked,
+        app-owned, running, or otherwise unverifiable sessions.
+        """
+        try:
+            import contextlib as _contextlib
+            from kiro_crew.dashboard import chat_handlers as _ch
+            _slot_lock = getattr(_slot, "_lock", None)
+            _pick_lock = getattr(_slot, "_model_pick_lock", None)
+            _name = getattr(_slot, "key", None)
+            if not _name or _slot_lock is None or _pick_lock is None:
+                return False
+            if getattr(_slot, "_app", "") or getattr(_slot, "linked_session_key", None):
+                return False
+            if not all(callable(getattr(_ch, item, None)) for item in (
+                "_slot_switch_session_lock", "_switch_target_busy",
+                "_subagents_attached_response", "_reset_slot_session_or_warn",
+            )):
+                return False
+            async with _contextlib.AsyncExitStack() as _stack:
+                await _stack.enter_async_context(_slot_lock)
+                # A slot could have been closed/recreated while waiting.
+                if state._slots.get(_name) is not _slot:
+                    return False
+                _key = effective_session_key(_slot)
+                await _stack.enter_async_context(_ch._slot_switch_session_lock(_key))
+                await _stack.enter_async_context(_pick_lock)
+                if state._slots.get(_name) is not _slot or effective_session_key(_slot) != _key:
+                    return False
+                # A user could have pinned a concrete model while this helper
+                # queued on the same locks. Such a pick always wins.
+                if str(getattr(_slot, "model", "") or "").strip() != _prior or _slot.jev_route is not _prior_jev:
+                    return False
+                _provider = state.sessions.get_provider(_key)
+                if _provider is not _expected:
+                    return False
+                if _ch._switch_target_busy(state, _slot, _key, _provider):
+                    return False
+                if getattr(_slot, "_deferred_model_switch_key", None) or getattr(_slot, "_active_fallback_model", None):
+                    return False
+                if getattr(_slot, "_refusal_fallback_primary", None):
+                    return False
+                if await _ch._subagents_attached_response(state, _slot, _key, "byo_mode_reconcile") is not None:
+                    return False
+                # Re-check immediately before the teardown's atomic busy gate.
+                if (state.sessions.get_provider(_key) is not _provider or
+                        _ch._switch_target_busy(state, _slot, _key, _provider)):
+                    return False
+                # Mirror Crew's model-picker commit/rollback transaction. New
+                # turns may start without taking the model-picker lock, so
+                # publish the new selection BEFORE awaiting the atomic reset.
+                _previous = _slot.model
+                _previous_jev = _slot.jev_route
+                _previous_gen = _slot._model_pick_gen
+                _slot.model = _target
+                _slot.jev_route = False
+                _slot._model_pick_gen += 1
+                try:
+                    _reset = await _ch._reset_slot_session_or_warn(
+                        state, _slot, _key, switch_kind="model"
+                    )
+                except BaseException:
+                    if _slot.model == _target and _slot._model_pick_gen == _previous_gen + 1:
+                        _slot.model = _previous
+                        _slot.jev_route = _previous_jev
+                        _slot._model_pick_gen = _previous_gen
+                    raise
+                if (_reset is False or effective_session_key(_slot) != _key or
+                        state._slots.get(_name) is not _slot):
+                    if _slot.model == _target and _slot._model_pick_gen == _previous_gen + 1:
+                        _slot.model = _previous
+                        _slot.jev_route = _previous_jev
+                        _slot._model_pick_gen = _previous_gen
+                    return False
+                # True: normal reset. None: session was popped but its teardown
+                # raised (Crew's documented committed-with-warning case).
+                _slot._dirty = True
+                try:
+                    _ch._broadcast_context_reset(state, _slot.key, None)
+                except Exception:
+                    logger.debug("Kiro BYO context reset broadcast unavailable", exc_info=True)
+                return True
+        except Exception:
+            logger.warning("Kiro BYO idle Mode change could not reset ACP session safely", exc_info=True)
+            return False
+
     for _slot in targets:
-        # A live ACP session is pinned to its creating harness, even if the
-        # global default changes later. Inspect its actual provider first.
-        # Never infer a different backend from the *new* global config while
-        # a session is running. The native Kiro backend id is the empty string
-        # and must not be mistaken for a missing backend.
+        # Do not mutate App-owned or linked/member slots from the global chat
+        # catalogue read. Those surfaces own their own backend lifecycle.
+        if getattr(_slot, "_app", "") or getattr(_slot, "linked_session_key", None):
+            continue
+        # The configured backend is the TARGET harness; a warm ACP provider
+        # describes only the OLD harness. Reading the latter as the target left
+        # official -> BYO and BYO -> official sessions permanently stale.
+        # _configured_backend_for_slot also preserves Crew's member routing.
         try:
             _live = state.sessions.get_provider(effective_session_key(_slot))
+            _backend = await _configured_backend_for_slot(_slot)
+            if not isinstance(_backend, str):
+                continue
             if _live is not None:
-                _capabilities = getattr(_live, "capabilities", None)
-                _backend = getattr(_capabilities, "backend", None)
-                if not isinstance(_backend, str):
-                    # Unknown live provider type: do not mutate its saved model.
+                _actual = getattr(getattr(_live, 'capabilities', None), 'backend', None)
+                if not isinstance(_actual, str):
                     continue
             else:
-                # A cold slot has no owner yet; only then can configured
-                # routing select the initial harness.
-                _backend = await _configured_backend_for_slot(_slot)
+                _actual = _backend
+            _backend_changed = _live is not None and _actual != _backend
         except Exception:
             logger.debug("Kiro BYO slot backend probe failed during routing reconciliation", exc_info=True)
             continue
@@ -146,14 +244,30 @@ async def _kiro_byo_reconcile_slot_routing(state: DashboardState, slot: _ChatSlo
         _jev = getattr(_slot, "jev_route", False) is True
 
         if _backend == ACP_BACKEND_KIRO_BYO:
-            # A stale official routing selection has no meaning under BYO. Map
-            # it to the active Mode's default Type. Concrete pins survive.
-            if _jev or _raw_lower in {"", "auto", "auto:jev"}:
+            # Type identifiers are routing selections, not concrete pins.
+            # Preserve non-default picks within the CURRENT Mode, but migrate
+            # old-Mode picks even when the prior ACP session is still warm.
+            _old_type = (
+                _raw_lower.startswith("kiro-byo-type:")
+                and _raw_lower.count(":") == 2
+                and all(_raw_lower.split(":", 2)[1:])
+            )
+            if _jev or _raw_lower in {"", "auto", "auto:jev"} or _old_type:
                 _target = await _default_type()
+                _target_pack = _target.split(":", 2)[1] if _target.startswith("kiro-byo-type:") else ""
+                _raw_pack = _raw_lower.split(":", 2)[1] if _old_type else ""
+                if _old_type and (not _target_pack or (_target_pack == _raw_pack and not _backend_changed)):
+                    continue
                 if _target and (_raw != _target or _jev):
-                    _slot.model = _target
-                    _slot.jev_route = False
-                    _slot._dirty = True
+                    if _live is not None:
+                        if not await _retire_idle_byo_session(_slot, _live, _target, _raw, _jev):
+                            # Never show Tiga when the ACP session could still
+                            # run Dyna. A busy session keeps its old policy.
+                            continue
+                    else:
+                        _slot.model = _target
+                        _slot.jev_route = False
+                        _slot._dirty = True
                     changed = True
             continue
 
@@ -161,10 +275,16 @@ async def _kiro_byo_reconcile_slot_routing(state: DashboardState, slot: _ChatSlo
         # into Kiro or another backend. KiroCrew 0.10 represents the official
         # Kiro backend/default selection with the empty value too, so every
         # non-BYO harness is returned to its native empty/default selection.
-        if _raw.startswith("kiro-byo-type:"):
-            _slot.model = ""
-            _slot.jev_route = False
-            _slot._dirty = True
+        if _raw_lower.startswith("kiro-byo-type:"):
+            if _live is not None:
+                if not await _retire_idle_byo_session(_slot, _live, "", _raw, _jev):
+                    # A busy/unknown session retains the original ACP harness;
+                    # changing only the composer model would misrepresent it.
+                    continue
+            else:
+                _slot.model = ""
+                _slot.jev_route = False
+                _slot._dirty = True
             changed = True
 
     if changed:

@@ -303,3 +303,189 @@ def test_crew10_slot_routing_reconciliation_migrates_only_routing_sentinels(monk
     # both probe this helper during one UI transition.
     assert asyncio.run(reconcile(state)) is False
     assert state.pushes == 1
+
+
+def test_crew10_warm_byo_mode_switch_retires_idle_session_in_both_directions(monkeypatch, tmp_path):
+    """Regression: an idle warm ACP handle must not pin the composer to the old Mode."""
+    import asyncio
+    import contextlib
+    import logging
+    import sys
+    import types
+    from types import SimpleNamespace
+
+    import kiro_byo.config as byo_config
+    import kiro_byo.paths as byo_paths
+
+    current = {'pack': 'tiga', 'type': 'multi'}
+    monkeypatch.setattr(byo_config, 'load_catalog_config', lambda _: SimpleNamespace(
+        models=[object()], mode_pack=current['pack'], mode_type=current['type']))
+    monkeypatch.setattr(byo_paths, 'use_app_home', lambda _: contextlib.nullcontext())
+    root = types.ModuleType('kiro_crew')
+    apps = types.ModuleType('kiro_crew.apps')
+    manager = types.ModuleType('kiro_crew.apps.manager')
+    manager.app_data_dir = lambda _: tmp_path
+    dashboard = types.ModuleType('kiro_crew.dashboard')
+    handlers = types.ModuleType('kiro_crew.dashboard.chat_handlers')
+    for name, module in {'kiro_crew': root, 'kiro_crew.apps': apps,
+                         'kiro_crew.apps.manager': manager, 'kiro_crew.dashboard': dashboard,
+                         'kiro_crew.dashboard.chat_handlers': handlers}.items():
+        monkeypatch.setitem(sys.modules, name, module)
+    dashboard.chat_handlers = handlers
+
+    class Slot:
+        def __init__(self, name, model, *, busy=False, children=False, app='', linked=''):
+            self.key = name
+            self.model = model
+            self.jev_route = False
+            self.running = busy
+            self.children = children
+            self._app = app
+            self.linked_session_key = linked
+            self._dirty = False
+            self._lock = asyncio.Lock()
+            self._model_pick_lock = asyncio.Lock()
+            self._model_pick_gen = 0
+
+    class State:
+        def __init__(self, slots):
+            self._slots = {s.key: s for s in slots}
+            self.providers = {s.key: SimpleNamespace(capabilities=SimpleNamespace(backend='kiro-byo'))
+                              for s in slots}
+            self.sessions = SimpleNamespace(get_provider=lambda key: self.providers.get(key))
+            self.pushes = 0
+            self.resets = []
+        def push_slots_update(self):
+            self.pushes += 1
+
+    lock = asyncio.Lock()
+    @contextlib.asynccontextmanager
+    async def session_lock(_key):
+        async with lock:
+            yield
+
+    async def attached(_state, slot, _key, _reason):
+        return object() if slot.children else None
+
+    async def reset(state, slot, key, *, switch_kind):
+        assert switch_kind == 'model'
+        state.resets.append((key, slot.model))
+        if getattr(slot, 'decline', False):
+            return False
+        state.providers.pop(key)
+        return True
+
+    handlers._slot_switch_session_lock = session_lock
+    handlers._switch_target_busy = lambda _state, slot, _key, _provider: slot.running
+    handlers._subagents_attached_response = attached
+    handlers._reset_slot_session_or_warn = reset
+    handlers._broadcast_context_reset = lambda *_args: None
+
+    async def backend_for(_slot):
+        return 'kiro-byo'
+
+    ns = {'DashboardState': State, '_ChatSlot': Slot, 'ACP_BACKEND_KIRO_BYO': 'kiro-byo',
+          'asyncio': asyncio, 'logger': logging.getLogger('test-warm-mode'),
+          '_configured_backend_for_slot': backend_for, 'effective_session_key': lambda s: s.key}
+    exec(crew10_patch._KIRO_BYO_SLOT_RECONCILE_HELPER, ns)
+    reconcile = ns['_kiro_byo_reconcile_slot_routing']
+
+    warm = Slot('warm', 'kiro-byo-type:dyna:flash')
+    busy = Slot('busy', 'kiro-byo-type:dyna:strong', busy=True)
+    children = Slot('children', 'kiro-byo-type:dyna:miracle', children=True)
+    concrete = Slot('concrete', 'demo/model')
+    current_tiga = Slot('tiga', 'kiro-byo-type:tiga:power')
+    app = Slot('app', 'kiro-byo-type:dyna:flash', app='other-app')
+    declined = Slot('declined', 'kiro-byo-type:dyna:flash')
+    declined.decline = True
+    state = State([warm, busy, children, concrete, current_tiga, app, declined])
+
+    assert asyncio.run(reconcile(state)) is True
+    assert warm.model == 'kiro-byo-type:tiga:multi'
+    assert state.resets == [('warm', 'kiro-byo-type:tiga:multi'), ('declined', 'kiro-byo-type:tiga:multi')]
+    assert warm._model_pick_gen == 1 and warm._dirty
+    assert state.providers.get('warm') is None  # actual session retired, not just UI change
+    assert busy.model == 'kiro-byo-type:dyna:strong' and children.model == 'kiro-byo-type:dyna:miracle'
+    assert declined.model == 'kiro-byo-type:dyna:flash' and declined._model_pick_gen == 0
+    assert app.model == 'kiro-byo-type:dyna:flash'
+    assert concrete.model == 'demo/model' and current_tiga.model == 'kiro-byo-type:tiga:power'
+    assert state.pushes == 1
+    assert asyncio.run(reconcile(state)) is False  # repeated model-list reads are idempotent
+    assert state.pushes == 1
+
+    current.update(pack='dyna', type='flash')
+    # New warm provider after first Tiga turn.
+    state.providers['warm'] = SimpleNamespace(capabilities=SimpleNamespace(backend='kiro-byo'))
+    assert asyncio.run(reconcile(state)) is True
+    assert warm.model == 'kiro-byo-type:dyna:flash'
+    assert warm._model_pick_gen == 2 and state.providers.get('warm') is None
+    assert busy.model == 'kiro-byo-type:dyna:strong'  # same-Mode manual Type retained
+    assert concrete.model == 'demo/model'
+
+    # A manual concrete-model pin arriving while the reconciler waits on
+    # Crew's slot lock must not be overwritten by the older stale snapshot.
+    race = Slot('race', 'kiro-byo-type:tiga:multi')
+    state._slots[race.key] = race
+    state.providers[race.key] = SimpleNamespace(capabilities=SimpleNamespace(backend='kiro-byo'))
+    async def pin_while_queued():
+        await race._lock.acquire()
+        try:
+            task = asyncio.create_task(reconcile(state, race))
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            race.model = 'manual/model'
+        finally:
+            race._lock.release()
+        return await task
+    assert asyncio.run(pin_while_queued()) is False
+    assert race.model == 'manual/model'
+    assert 'race' in state.providers
+    assert all(key != 'race' for key, _target in state.resets)
+
+
+def test_crew10_warm_mode_switch_fail_closed_when_host_contract_unavailable(monkeypatch, tmp_path):
+    """Do not claim Tiga while an unresettable Dyna ACP session is still live."""
+    import asyncio
+    import contextlib
+    import logging
+    import sys
+    import types
+    from types import SimpleNamespace
+    import kiro_byo.config as byo_config
+    import kiro_byo.paths as byo_paths
+
+    monkeypatch.setattr(byo_config, 'load_catalog_config', lambda _: SimpleNamespace(
+        models=[object()], mode_pack='tiga', mode_type='multi'))
+    monkeypatch.setattr(byo_paths, 'use_app_home', lambda _: contextlib.nullcontext())
+    for name in ('kiro_crew', 'kiro_crew.apps', 'kiro_crew.dashboard'):
+        monkeypatch.setitem(sys.modules, name, types.ModuleType(name))
+    m = types.ModuleType('kiro_crew.apps.manager')
+    m.app_data_dir = lambda _: tmp_path
+    monkeypatch.setitem(sys.modules, 'kiro_crew.apps.manager', m)
+    h = types.ModuleType('kiro_crew.dashboard.chat_handlers')
+    monkeypatch.setitem(sys.modules, 'kiro_crew.dashboard.chat_handlers', h)
+    class Slot:
+        key = 'a'
+        model = 'kiro-byo-type:dyna:flash'
+        jev_route = False
+        _dirty = False
+        _lock = asyncio.Lock()
+        _model_pick_lock = asyncio.Lock()
+        _model_pick_gen = 0
+    slot = Slot()
+    live = SimpleNamespace(capabilities=SimpleNamespace(backend='kiro-byo'))
+    class State:
+        _slots = {'a': slot}
+        sessions = SimpleNamespace(get_provider=lambda _: live)
+        pushes = 0
+        def push_slots_update(self):
+            self.pushes += 1
+    async def backend_for(_slot):
+        return 'kiro-byo'
+    ns = {'DashboardState': State, '_ChatSlot': Slot, 'ACP_BACKEND_KIRO_BYO': 'kiro-byo',
+          'asyncio': asyncio, 'logger': logging.getLogger('test-fail-closed'),
+          '_configured_backend_for_slot': backend_for, 'effective_session_key': lambda s: s.key}
+    exec(crew10_patch._KIRO_BYO_SLOT_RECONCILE_HELPER, ns)
+    state = State()
+    assert asyncio.run(ns['_kiro_byo_reconcile_slot_routing'](state)) is False
+    assert (slot.model, slot._dirty, state.pushes) == ('kiro-byo-type:dyna:flash', False, 0)

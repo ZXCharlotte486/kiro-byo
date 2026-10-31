@@ -7,17 +7,20 @@ never included in returned provider dictionaries and are never written back to
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import re
 import tempfile
 import threading
+import time
 from functools import wraps
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from .config import ConfigError, config_path, official_endpoint_for_preset
+from .state_io import _file_transaction_lock
 from .credential_store import (
     CredentialStore,
     CredentialStoreError,
@@ -42,20 +45,54 @@ from .i18n import normalize_ui_language
 
 
 _CONFIG_MUTATION_LOCK = threading.RLock()
+_CONFIG_MUTATION_CONTEXT = threading.local()
+_IS_WINDOWS = os.name == "nt"
+# Windows antivirus/indexers and readers may briefly hold a handle without
+# FILE_SHARE_DELETE, causing os.replace to fail even for a writable destination.
+# Bounded retry only: permanent ACL/read-only errors must still be surfaced.
+_WINDOWS_REPLACE_BACKOFF = (0.05, 0.12, 0.25, 0.5)
+
+
+def _replace_provider_config(tmp: Path, destination: Path) -> None:
+    for attempt in range(len(_WINDOWS_REPLACE_BACKOFF) + 1):
+        try:
+            os.replace(tmp, destination)
+            return
+        except OSError as exc:
+            winerror = getattr(exc, "winerror", None)
+            if not _IS_WINDOWS or not (
+                winerror in (5, 32, 33) or
+                (winerror is None and exc.errno in (errno.EACCES, errno.EBUSY))
+            ):
+                raise
+            if attempt >= len(_WINDOWS_REPLACE_BACKOFF):
+                raise
+            time.sleep(_WINDOWS_REPLACE_BACKOFF[attempt])
+
 
 
 def _serialized_config_mutation(func):
-    """Serialize local read-modify-write config operations.
+    """Serialize config read-modify-write across threads *and* processes.
 
-    The management UI uses ThreadingHTTPServer, so independent requests can hit
-    provider_admin concurrently. Serializing mutations prevents one request from
-    committing a stale snapshot over another. The lock is re-entrant because
-    configure_provider may invoke credential migration before its own commit.
+    The stable sidecar lock covers the entire transaction, not just os.replace.
+    Nested credential migration reuses the outer lock on the same thread;
+    acquiring a second OS lock on the same file could self-deadlock.
     """
     @wraps(func)
     def wrapped(*args, **kwargs):
         with _CONFIG_MUTATION_LOCK:
-            return func(*args, **kwargs)
+            if getattr(_CONFIG_MUTATION_CONTEXT, "active_path", None) is not None:
+                requested = kwargs.get("path")
+                if requested is not None and Path(requested) != _CONFIG_MUTATION_CONTEXT.active_path:
+                    raise ConfigError("nested provider transaction cannot switch config paths")
+                return func(*args, **kwargs)
+            target = Path(kwargs.get("path") or config_path())
+            with _file_transaction_lock(target):
+                _CONFIG_MUTATION_CONTEXT.active_path = target
+                try:
+                    return func(*args, **kwargs)
+                finally:
+                    del _CONFIG_MUTATION_CONTEXT.active_path
     return wrapped
 
 
@@ -142,7 +179,7 @@ def _write_raw(raw: dict[str, Any], path: Path | None = None) -> None:
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(tmp, path)
+        _replace_provider_config(tmp, path)
     finally:
         if fd >= 0:
             try:
@@ -535,7 +572,12 @@ def set_mode_selection(policy: str, pack: str = "") -> dict[str, Any]:
         selected_pack, selected_policy = resolve_policy(pack_id, value)
     except PolicyPackError as exc:
         raise ConfigError(str(exc)) from exc
-    raw["mode"] = {"id": selected_pack.id, "type": selected_policy.id}
+    selected_mode = {"id": selected_pack.id, "type": selected_policy.id}
+    # Re-selecting an already active Type must not rewrite providers.json.
+    # In particular, avoid a pointless Windows replace race on repeated clicks.
+    if raw.get("mode") == selected_mode:
+        return mode_settings()
+    raw["mode"] = selected_mode
     # Mode/Type policy and concrete-model defaults are independent axes. Changing
     # the active Mode must not erase provider/model preferences that may be used
     # by explicit concrete-model sessions or fallback control surfaces.
@@ -960,7 +1002,6 @@ def probe_provider_connection(*, base_url: str, api_key: str, preset_id: str = "
     }
 
 
-@_serialized_config_mutation
 def configure_provider(
     *,
     base_url: str,
@@ -1033,6 +1074,27 @@ def configure_provider(
             message = message.replace(api_key, "[REDACTED]")
         raise DiscoveryError(message + "; provide model ids manually if this provider does not expose a compatible model catalogue") from discovery_error
 
+    return _commit_configured_provider(
+        base_url=base_url, api_key=api_key, store=store,
+        provider_name=provider_name, preset=preset, instance_id=instance_id,
+        create_new=create_new, credential_profile=credential_profile,
+        discovered_id=discovered_id, discovered_name=discovered_name,
+        models=models,
+    )
+
+
+@_serialized_config_mutation
+def _commit_configured_provider(
+    *, base_url: str, api_key: str, store: CredentialStore,
+    provider_name: str, preset: Any, instance_id: str,
+    create_new: bool, credential_profile: Any,
+    discovered_id: str, discovered_name: str, models: list[DiscoveredModel],
+) -> dict[str, Any]:
+    """Commit an already-discovered catalogue under the shared config lock.
+
+    Re-read the latest persisted configuration here so model discovery never
+    holds the cross-process config lock or overwrites unrelated changes.
+    """
     # Normalize older configs before marking the config as schema v1.
     migrate_plaintext_credentials(store=store)
     raw = _read_raw()
@@ -1178,8 +1240,8 @@ def update_provider_credential(
     return _safe_provider(provider, store)
 
 
-@_serialized_config_mutation
 def refresh_provider_models(provider_id: str, *, store: CredentialStore | None = None) -> dict[str, Any]:
+    """Perform slow network discovery outside the cross-process config lock."""
     store = store or _store()
     raw = _read_raw()
     provider = next(
@@ -1197,7 +1259,8 @@ def refresh_provider_models(provider_id: str, *, store: CredentialStore | None =
         secrets = decode_provider_secrets(stored)
     else:
         secrets = ProviderSecrets()
-    preset = provider_preset(str(provider.get("preset_id") or "custom")) or provider_preset("custom")
+    preset_id = str(provider.get("preset_id") or "custom")
+    preset = provider_preset(preset_id) or provider_preset("custom")
     assert preset is not None
     try:
         discovered_id, discovered_name, models = _discover_for_preset(preset, base_url, secrets.api_key)
@@ -1206,9 +1269,40 @@ def refresh_provider_models(provider_id: str, *, store: CredentialStore | None =
         if secrets.api_key:
             message = message.replace(secrets.api_key, "[REDACTED]")
         raise DiscoveryError(message) from exc
-    if discovered_id != provider_id:
-        # Keep the persisted routing id stable, as metadata_refresh does.
-        discovered_id = provider_id
+    return _commit_refreshed_provider_models(
+        provider_id=provider_id, store=store, base_url=base_url,
+        credential_ref=ref, preset_id=preset_id,
+        discovery_api_key=secrets.api_key,
+        discovered_name=discovered_name, models=models,
+    )
+
+
+@_serialized_config_mutation
+def _commit_refreshed_provider_models(
+    *, provider_id: str, store: CredentialStore, base_url: str,
+    credential_ref: str, preset_id: str, discovery_api_key: str,
+    discovered_name: str, models: list[DiscoveredModel],
+) -> dict[str, Any]:
+    """Apply discovered models to the latest provider state, or reject stale discovery."""
+    raw = _read_raw()
+    provider = next(
+        (p for p in raw.get("providers", []) if isinstance(p, dict) and str(p.get("id") or "") == provider_id),
+        None,
+    )
+    if not isinstance(provider, dict):
+        raise ConfigError(f"provider {provider_id!r} was removed during model discovery")
+    if (
+        str(provider.get("base_url") or "").strip() != base_url
+        or str(provider.get("credential_ref") or "").strip() != credential_ref
+        or str(provider.get("preset_id") or "custom") != preset_id
+    ):
+        raise ConfigError("provider configuration changed during model discovery; please retry")
+    # A credential update may keep the same reference; old-key discovery must
+    # never replace the catalogue for a newly authorized account.
+    if credential_ref:
+        current_secret = store.get(credential_ref)
+        if current_secret is None or decode_provider_secrets(current_secret).api_key != discovery_api_key:
+            raise ConfigError("provider credentials changed during model discovery; please retry")
     provider["name"] = str(provider.get("name") or discovered_name)
     provider["models"] = _preserve_model_thinking_preferences(provider, [_model_dict(model) for model in models])
     provider["metadata_schema_version"] = 7

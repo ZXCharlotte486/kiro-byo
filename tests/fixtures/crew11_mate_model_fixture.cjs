@@ -47,10 +47,10 @@ function makeScenario({opened, role='dialog'}={}) {
   };
   const ctx={document,NodeFilter:{SHOW_TEXT:4},MutationObserver:class{constructor(fn){observer=fn}observe(){}},window:{requestAnimationFrame:fn=>fn()}};
   vm.runInNewContext(source,ctx,{timeout:3000});
-  assert.equal(selected.nodeValue,'Tiga · Sky Type','selected Mate model trigger');
+  assert.equal(selected.nodeValue,'Sky Type','selected Mate model trigger');
   if(opened){
-    assert.equal(t1.nodeValue,'Tiga · Sky Type','Mate Sky option label');
-    assert.equal(t2.nodeValue,'Tiga · Multi Type','Mate Multi option label');
+    assert.equal(t1.nodeValue,'Sky Type','Mate Sky option label');
+    assert.equal(t2.nodeValue,'Multi Type','Mate Multi option label');
     assert.equal(t3.nodeValue,'DeepSeek-V4.1-Flash','concrete model unchanged');
     assert.equal(t4.nodeValue,'继承','inherit preserved');
     assert.equal(option1.getAttribute('data-wire'),wire,'wire untouched');

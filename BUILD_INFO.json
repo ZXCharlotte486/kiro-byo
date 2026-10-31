@@ -1,18 +1,18 @@
 {
-  "build_id": "0.2.5+69632eccef13258f",
-  "candidate_label": "0.2.5-crew11-rc1-agents-owned-upgrade-hotfix",
-  "crew_candidate": "v0.11.0-rc.1",
-  "crew_candidate_commit": "uploaded_rc1_archive_source_checked",
-  "crew_candidate_source_contract": "rc1_semantic_21_seams_member_route_failclosed_task_console_native_sync_no_windows_e2e",
+  "build_id": "0.3.0+d0b3e0e9509e9857",
+  "candidate_label": "0.3.0-v17-user-sssp-byo-icon-only-crew-0111rc2-preflight-e2e-pending",
+  "crew_candidate": "v0.11.0-rc.2+, v0.11.0, v0.11.1-rc.1+ and v0.11.1 (provisional strict source-contract preflight)",
+  "crew_candidate_commit": "v0.11.1-rc.2_tag_a27d362_observed_upstream_not_fully_source_audited",
+  "crew_candidate_source_contract": "0111_rc2_strict_local_source_and_dashboard_preflight_23_seams_no_cross_platform_e2e",
   "crew_commit": "uploaded_rc1_archive_source_checked",
-  "crew_target": "v0.11.0-rc.1",
+  "crew_target": "v0.11.0-rc.1 source-audited; guarded 0.11.0-rc.2+, 0.11.0, 0.11.1-rc.1+, 0.11.1 (local contract checks only)",
   "cross_platform_e2e": {
     "linux": "not_verified",
     "macos": "not_verified",
     "windows": "not_verified"
   },
   "product": "Kiro BYO",
-  "runtime_sha256": "69632eccef13258fe62e7c73b6fb11874c6b6f09226fa5836af00cdbc422ca9b",
-  "version": "0.2.5",
+  "runtime_sha256": "d0b3e0e9509e98576c4cf237f3851ca94f659dc83e1478bb230f557dd7cfefa0",
+  "version": "0.3.0",
   "windows_e2e": "not_verified"
 }

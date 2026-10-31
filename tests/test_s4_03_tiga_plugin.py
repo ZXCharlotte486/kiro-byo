@@ -21,7 +21,7 @@ from kiro_byo.config import KiroByoConfig, ModelSpec, ProviderSpec
 # Frozen SHA256 from S4-02: Tiga Type weighting and execution policy are not
 # altered by the Mode Registry migration.
 TIGA_S402_POLICY_SHA = '0c09ad73ea883b38ae177afb4b0bc88a8915cf4e95b85f1b88836ed0bb743969'
-DYNA_S402_POLICY_SHA = 'a57c7ff9f61c22f073cb8435fc593ffe64aa6d3896225ec0c592d8a1986636aa'
+DYNA_S402_POLICY_SHA = '6a04ec5da69d631ff86c36835db7b1e5ad3feff1ce918529a4dd398a005773a0'
 
 
 def test_tiga_is_explicit_built_in_mode_and_policy_byte_identical():
@@ -30,8 +30,8 @@ def test_tiga_is_explicit_built_in_mode_and_policy_byte_identical():
     tiga, dyna = definitions
     assert tiga.type_ids == ('sky', 'multi', 'power', 'glitter')
     assert tiga.default_type == 'multi' and tiga.enabled
-    assert dyna.type_ids == ('flash', 'strong', 'miracle')
-    assert dyna.default_type == 'flash' and not dyna.enabled
+    assert dyna.type_ids == ('miracle', 'flash', 'strong')
+    assert dyna.default_type == 'flash' and dyna.enabled
     assert hashlib.sha256(tiga.policy_path.read_bytes()).hexdigest() == TIGA_S402_POLICY_SHA
     assert hashlib.sha256(dyna.policy_path.read_bytes()).hexdigest() == DYNA_S402_POLICY_SHA
     registry = load_mode_registry()
@@ -56,9 +56,8 @@ def test_existing_policy_apis_and_selection_identity_are_stable():
     )
     for type_id in ('sky', 'multi', 'power', 'glitter'):
         assert resolve_policy('tiga', type_id)[1] == tiga.policy(type_id)
-    for type_id in ('flash', 'strong', 'miracle'):
-        with pytest.raises(PolicyPackError, match='not available'):
-            resolve_policy('dyna', type_id)
+    for type_id in ('miracle', 'flash', 'strong'):
+        assert resolve_policy('dyna', type_id)[1].id == type_id
 
 
 def test_tiga_routes_all_four_types_without_a_decision_model():
@@ -111,7 +110,7 @@ def test_user_mode_hot_reload_remains_data_only_and_legacy_tiga_override_is_pres
         dyna['enabled'] = True
         (directory / 'dyna.json').write_text(json.dumps(dyna))
         registry = load_mode_registry()
-        assert registry.get('dyna').enabled is False
+        assert registry.get('dyna').enabled is True
         assert any('reserved' in row['error'] for row in registry.errors)
 
 

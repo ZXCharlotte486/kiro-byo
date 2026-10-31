@@ -30,7 +30,7 @@ RELEASE_ROOT_FILES = {
     "configure.ps1",
     "manage.ps1",
 }
-RELEASE_DIRS = {"backend", "config", "integration", "src", "ui"}
+RELEASE_DIRS = {"assets", "backend", "config", "integration", "src", "ui"}
 SOURCE_EXCLUDED_PARTS = {
     ".git", ".pytest_cache", ".mypy_cache", ".ruff_cache", "__pycache__",
     "build", "dist", ".venv", "venv",
@@ -58,7 +58,7 @@ MUTABLE_PREFIXES = (
     "data/agent_workspaces/",
     "data/audit/",
 )
-RUNTIME_COMPARE_DIRS = {"backend", "config", "integration", "src", "ui"}
+RUNTIME_COMPARE_DIRS = {"assets", "backend", "config", "integration", "src", "ui"}
 RUNTIME_COMPARE_ROOT_FILES = {"app.json", "VERSION", "configure.ps1", "manage.ps1"}
 
 
@@ -177,18 +177,18 @@ def main() -> int:
         "version": version,
         "build_id": f"{version}+{runtime_sha[:16]}",
         "runtime_sha256": runtime_sha,
-        "crew_target": "v0.11.0-rc.1",
+        "crew_target": "v0.11.0-rc.1 source-audited; guarded 0.11.0-rc.2+, 0.11.0, 0.11.1-rc.1+, 0.11.1 (local contract checks only)",
         "crew_commit": "uploaded_rc1_archive_source_checked",
-        "crew_candidate": "v0.11.0-rc.1",
-        "crew_candidate_commit": "uploaded_rc1_archive_source_checked",
-        "crew_candidate_source_contract": "rc1_semantic_21_seams_member_route_failclosed_task_console_native_sync_no_windows_e2e",
+        "crew_candidate": "v0.11.0-rc.2+, v0.11.0, v0.11.1-rc.1+ and v0.11.1 (provisional strict source-contract preflight)",
+        "crew_candidate_commit": "v0.11.1-rc.2_tag_a27d362_observed_upstream_not_fully_source_audited",
+        "crew_candidate_source_contract": "0111_rc2_strict_local_source_and_dashboard_preflight_23_seams_no_cross_platform_e2e",
         "windows_e2e": "not_verified",
         "cross_platform_e2e": {
             "windows": "not_verified",
             "macos": "not_verified",
             "linux": "not_verified",
         },
-        "candidate_label": "0.2.5-crew11-rc1-agents-owned-upgrade-hotfix",
+        "candidate_label": "0.3.0-v17-user-sssp-byo-icon-only-crew-0111rc2-preflight-e2e-pending",
     }
     (ROOT / "BUILD_INFO.json").write_text(
         json.dumps(build_info, ensure_ascii=False, sort_keys=True, indent=2) + "\n",

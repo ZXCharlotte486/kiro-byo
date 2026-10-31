@@ -38,11 +38,23 @@ class OverviewStateTests(unittest.TestCase):
         self.assertEqual(row["health"]["state"], "needs_integration")
         self.assertEqual(row["alerts"][0]["action"], "integration")
 
-    def test_recent_failures_link_to_records_surface(self):
+    def test_failed_requests_do_not_degrade_runtime_health(self):
         row = self._snapshot(diagnostics={"turns": 5, "success": 4, "failed": 1})
-        self.assertEqual(row["health"]["state"], "degraded")
-        self.assertEqual(row["alerts"][0]["action"], "records")
-        self.assertIn("记录", row["alerts"][0]["detail"])
+        self.assertEqual(row["health"]["state"], "ready")
+        self.assertEqual(row["runtime_health"], row["health"])
+        self.assertEqual(row["request_outcome"]["failed"], 1)
+        self.assertEqual(row["diagnostics"]["failed"], 1)
+        self.assertNotIn("recent-failures", [a["id"] for a in row["alerts"]])
+
+    def test_cancelled_and_timeout_request_do_not_degrade_runtime(self):
+        for failed in (0, 1, 10):
+            row = self._snapshot(diagnostics={"turns": 12, "success": 2, "failed": failed})
+            self.assertEqual(row["runtime_health"]["state"], "ready")
+        row = self._snapshot(
+            diagnostics={"turns": 12, "success": 2, "failed": 1},
+            integration={"supported": True, "installed": True, "restart_required": True},
+        )
+        self.assertEqual(row["health"]["state"], "restart_pending")
 
     def test_unsupported_crew_is_error(self):
         row = self._snapshot(integration={"supported": False, "installed": False, "error": "no profile"})

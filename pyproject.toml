@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kiro-byo"
-version = "0.2.5"
+version = "0.3.0"
 description = "Provider-neutral ACP Harness for KiroCrew"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -33,7 +33,7 @@ kiro-byo = "kiro_byo.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-kiro_byo = ["policy_packs/*.json", "catalog/*.json", "locales/*.json"]
+kiro_byo = ["policy_packs/*.json", "catalog/*.json", "locales/*.json", "assets/*.js"]
 
 
 [tool.pytest.ini_options]

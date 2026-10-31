@@ -26,7 +26,7 @@ def test_retired_transformer_is_rejected() -> None:
         _transformer_for({"transformer": "adaptive09"})
 
 
-@pytest.mark.parametrize("version", ["0.9.0", "0.9.0-insider.6", "0.9.1", "0.10.0", "0.11.0", "unknown"])
+@pytest.mark.parametrize("version", ["0.9.0", "0.9.0-insider.6", "0.9.1", "0.10.0", "unknown"])
 def test_unsupported_crew_never_reaches_patch_preflight(tmp_path: Path, version: str) -> None:
     # Reject even if a stray/foreign legacy adapter has been placed in the App.
     fake_app = tmp_path / "app"
@@ -60,3 +60,11 @@ def test_insider5_is_eligible_for_semantic_checks_but_not_false_claimed_as_audit
     assert not _version_audited(compat, "0.10.0-insider.5")
     assert not _version_audited(compat, "0.10.0")
     assert not _version_audited(compat, "0.11.0")
+
+
+def test_stable_011_reaches_source_validation_not_legacy_adapter(tmp_path: Path) -> None:
+    crew_pkg = tmp_path / "site-packages/kiro_crew"
+    crew_pkg.mkdir(parents=True)
+    with patch("kiro_byo.integration_manager.running_crew", return_value=("0.11.0", crew_pkg, crew_pkg.parent)):
+        with pytest.raises(IntegrationError, match="does not match a bundled"):
+            resolve_target(ROOT)

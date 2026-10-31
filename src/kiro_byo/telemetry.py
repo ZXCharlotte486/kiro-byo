@@ -154,7 +154,7 @@ class TurnTelemetryStore:
 
     def clear(self) -> int:
         """Delete the diagnostic ledger and return the number of records removed."""
-        with self._lock:
+        with self._lock, _file_transaction_lock(self.path):
             if not self.path.exists():
                 return 0
             count = 0

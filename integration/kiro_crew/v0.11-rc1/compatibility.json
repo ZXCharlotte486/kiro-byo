@@ -22,7 +22,9 @@
     "src/kiro_crew/dashboard/handlers/agents.py",
     "src/kiro_crew/dashboard/chat_api/slot_effort.py",
     "src/kiro_crew/dashboard/chat_handlers.py",
-    "src/kiro_crew/dashboard/chat_title.py"
+    "src/kiro_crew/dashboard/chat_title.py",
+    "src/kiro_crew/dashboard/chat_turn/turn_dispatch_gates.py",
+    "src/kiro_crew/dashboard/chat_turn/turn_stats.py"
   ],
   "baseline": "0.11.0-rc.1 source-specific adapter with BYO Mate 2.0 projection",
   "hash_mode": "normalized_utf8_lf",
@@ -143,7 +145,7 @@
       "for holder in [namespace, *(vars(owner) for owner in owners)]"
     ]
   },
-  "max_version_exclusive": "0.11.1",
+  "max_version_exclusive": "0.11.2",
   "allowed_crew_versions": [
     "0.11.0-rc.1",
     "0.11.0rc1"
@@ -152,7 +154,7 @@
     "0.11.0-rc.1",
     "0.11.0rc1"
   ],
-  "source_audit": "2026-10-26: exact uploaded rc.1 archive pinned; 21 semantic seams compile and are idempotent; BYO member dispatch and Mate Worker projection verified at source/unit level; Windows desktop E2E still pending",
+  "source_audit": "2026-10-26: exact uploaded rc.1 archive pinned; 21 semantic seams compile and are idempotent; BYO member dispatch and Mate Worker projection verified at source/unit level; Windows desktop E2E still pending; 2 additional 0.11 turn-clock owner seams validated by strict semantic anchors only (not exact RC1 source hashes; OS E2E pending)",
   "pinned_source_sha256": {
     "src/kiro_crew/agent_sdk/backends.py": {
       "pristine": "c4718b62def70b57c4bbe5dce78f963752227975dcece50e672da12870d26621",
@@ -238,5 +240,11 @@
       "pristine": "8bdf4083813dab46bb1abb2cc63eea82266809f919d34f10fd04350f02280b05",
       "patched": "711cc73b9d19e75fdffe3623eef9cf69cc49779ae7dc34a3cf260dac449f52c4"
     }
-  }
+  },
+  "candidate_policy": "0.11.0-rc.2+ and 0.11.1-rc.1+ may attempt strict local semantic source and dashboard preflight only; success never implies independently audited official tag or desktop E2E validation. 0.11.2 and 0.12 remain blocked.",
+  "semantic_candidate_regex": "^0\\.11\\.(?:0(?:-rc\\.|rc)(?:[2-9]|[1-9][0-9]+)|1(?:-rc\\.|rc)(?:[1-9]|[1-9][0-9]+))$",
+  "semantic_clock_seams_unpinned": [
+    "src/kiro_crew/dashboard/chat_turn/turn_dispatch_gates.py",
+    "src/kiro_crew/dashboard/chat_turn/turn_stats.py"
+  ]
 }

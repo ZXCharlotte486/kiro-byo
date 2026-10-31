@@ -9,6 +9,7 @@ packaging surfaces.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import sys
@@ -314,11 +315,18 @@ def _adaptive_routing_release_check() -> str | None:
     router = (ROOT / "src/kiro_byo/mode_router.py").read_text(encoding="utf-8")
     telemetry = (ROOT / "src/kiro_byo/telemetry.py").read_text(encoding="utf-8")
     runner = (ROOT / "src/kiro_byo/turn_runner.py").read_text(encoding="utf-8")
+    route_event_file = ROOT / "src/kiro_byo/routing_events.py"
+    if not route_event_file.is_file():
+        return "0.1.7 adaptive-routing contract missing: route event projection"
+    routing_events = route_event_file.read_text(encoding="utf-8")
     routes = (ROOT / "backend/routes.py").read_text(encoding="utf-8")
     ui = (ROOT / "ui/index.mjs").read_text(encoding="utf-8")
     required = (
         (adaptive, "class AdaptiveRoutingSnapshot", "runtime evidence snapshot"),
-        (adaptive, "recent first-visible and total turn latency", "real latency evidence"),
+        (adaptive, "completed-turn first-visible and total latency", "real latency evidence"),
+        (adaptive, "_model_evidence_outcome", "request outcome versus model failure separation"),
+        (adaptive, "_MODEL_FAILURE_CATEGORIES", "attributable failure category boundary"),
+        (adaptive, "if attributable is None:", "ignore cancelled or non-provider evidence"),
         (adaptive, "reliability_adjustment", "bounded reliability evidence"),
         (router, "task_profile_for_signals", "deterministic task profile"),
         (router, "profile=adaptive_profile", "router consumes policy-shaped runtime evidence"),
@@ -326,7 +334,8 @@ def _adaptive_routing_release_check() -> str | None:
         (router, "collaboration_routing", "Glitter worker routing is policy-driven"),
         (router, "recent latency blended", "routing explanation exposes adaptive speed"),
         (telemetry, 'task_profile: str = ""', "task-profile telemetry"),
-        (runner, '"task_profile": decision.signals.task_profile', "route trace task profile"),
+        (routing_events, '"task_profile": decision.signals.task_profile', "route trace task profile"),
+        (runner, "data=selected_route_event_data(", "Turn Engine emits shared route event"),
         (routes, 'AppRoute("GET", "/routing", get_routing_dashboard)', "read-only routing API"),
         (ui, "I18N:最近一次任务特征", "Modes-page task-profile evidence UI"),
         (ui, "I18N:最近 60 小时模型使用情况", "recent model-usage evidence UI"),
@@ -360,6 +369,10 @@ def _agent_runtime_release_check() -> str | None:
     router = (ROOT / "src/kiro_byo/mode_router.py").read_text(encoding="utf-8")
     intent = (ROOT / "src/kiro_byo/execution_intent.py").read_text(encoding="utf-8")
     runner = (ROOT / "src/kiro_byo/turn_runner.py").read_text(encoding="utf-8")
+    prompt_routing_path = ROOT / "src/kiro_byo/prompt_routing.py"
+    if not prompt_routing_path.is_file():
+        return "prompt routing boundary module is missing"
+    prompt_routing = prompt_routing_path.read_text(encoding="utf-8")
     server = (ROOT / "src/kiro_byo/acp_server.py").read_text(encoding="utf-8")
     policy = (ROOT / "src/kiro_byo/policy_packs.py").read_text(encoding="utf-8")
     required = (
@@ -383,11 +396,48 @@ def _agent_runtime_release_check() -> str | None:
         (server, '"_kiro/agent/resume"', "agent continuation control plane"),
         (server, "selection_kind", "selection truth kind"),
         (server, "selection_source", "selection truth source"),
-        (runner, "model.route.bypassed", "concrete-model routing bypass truth"),
+        (prompt_routing, "model.route.bypassed", "concrete-model routing bypass truth"),
+        (prompt_routing, "def _select_type_prompt_route", "shared Type prompt routing planner"),
     )
     for text, marker, label in required:
         if marker not in text:
             return f"unified Agent Runtime contract missing: {label}"
+    # Verify the wired mixins structurally, not a fragile verbatim class line.
+    turn_classes = [node for node in ast.parse(runner).body
+                    if isinstance(node, ast.ClassDef) and node.name == "TurnRunnerMixin"]
+    if len(turn_classes) != 1:
+        return "TurnRunner mixin missing or multiply defined"
+    mixins = {node.id for node in turn_classes[0].bases if isinstance(node, ast.Name)}
+    if not {"PromptRoutingMixin", "NativeToolDispatchMixin", "McpToolDispatchMixin", "ProviderLoopTerminalMixin"} <= mixins:
+        return "Turn Engine routing/native/MCP/terminal completion mixins not wired"
+    native_path = ROOT / "src/kiro_byo/native_tool_dispatch.py"
+    if not native_path.is_file():
+        return "native dispatch security boundary module missing"
+    native_text = native_path.read_text(encoding="utf-8")
+    for marker in (
+        "def _execute_native_tool", "def _approve_native_scope",
+        "def _run_authorized_native_invocation", "_pre_dispatch_tool_interrupt",
+        "revoke_scope_roots", "tool.call.completed", "session.native.audit.record",
+    ):
+        if marker not in native_text:
+            return f"native dispatch safety contract missing: {marker}"
+    terminal_path = ROOT / "src/kiro_byo/provider_loop_terminal.py"
+    if not terminal_path.is_file():
+        return "provider-loop terminal recovery boundary missing"
+    terminal_text = terminal_path.read_text(encoding="utf-8")
+    for marker in (
+        "def _finish_provider_loop_cancelled_before_invoke",
+        "def _finish_provider_loop_provider_error",
+        "def _finish_provider_loop_internal_error",
+        "_recover_current_turn", "preserve_side_effects=state.side_effect_risk_seen",
+        "runtime.internal_error", "error_category", "self.result(",
+    ):
+        if marker not in terminal_text:
+            return f"provider-loop terminal recovery contract missing: {marker}"
+    # Terminal handling is intentionally downstream of RecoveryPolicy. It must
+    # neither select models nor retry a failed invocation on its own.
+    if any(marker in terminal_text for marker in ("provider.retry", "model.route.fallback", "live_provider_failure")):
+        return "terminal completion unexpectedly contains retry/fallback decisions"
     # Type names belong in Policy Pack data/semantics, not in the generic plan
     # compiler. The legacy compatibility helper name is allowed outside it.
     plan_start = router.find("def build_execution_plan")
@@ -574,13 +624,28 @@ def main() -> int:
     if compat11.get("transformer") != "adaptive11" or compat11.get("allowed_crew_versions") != ["0.11.0-rc.1", "0.11.0rc1"]:
         print("FAIL: Crew 0.11 RC1 target metadata drift", file=sys.stderr)
         return 3
+    expected_candidate_regex = r"^0\.11\.(?:0(?:-rc\.|rc)(?:[2-9]|[1-9][0-9]+)|1(?:-rc\.|rc)(?:[1-9]|[1-9][0-9]+))$"
+    if compat11.get("semantic_candidate_regex") != expected_candidate_regex:
+        print("FAIL: Crew 0.11.x prerelease candidate guard drift", file=sys.stderr)
+        return 3
+    if any(version.startswith(("0.11.0-rc.", "0.11.0rc", "0.11.1-rc.", "0.11.1rc")) and version not in ("0.11.0-rc.1", "0.11.0rc1")
+           for version in compat11.get("verified_versions", [])):
+        print("FAIL: an unaudited 0.11 RC candidate must not be marked verified", file=sys.stderr)
+        return 3
     pins = compat11.get("pinned_source_sha256")
     generated = compat11.get("generated_files")
     if (compat11.get("verified_through") != "0.11.0-rc.1"
             or not isinstance(pins, dict)
             or not isinstance(generated, list)
-            or len(generated) != 21
-            or set(pins) != set(generated)
+            or len(generated) != 23
+            or set(pins) != set(generated) - {
+                "src/kiro_crew/dashboard/chat_turn/turn_dispatch_gates.py",
+                "src/kiro_crew/dashboard/chat_turn/turn_stats.py",
+            }
+            or set(compat11.get("semantic_clock_seams_unpinned") or []) != {
+                "src/kiro_crew/dashboard/chat_turn/turn_dispatch_gates.py",
+                "src/kiro_crew/dashboard/chat_turn/turn_stats.py",
+            }
             or not all(isinstance(record, dict)
                        and all(isinstance(record.get(k), str) and len(record[k]) == 64
                                for k in ("pristine", "patched"))
@@ -654,6 +719,27 @@ def main() -> int:
     if ui_contract_error:
         print(f"FAIL: {ui_contract_error}", file=sys.stderr)
         return 22
+
+    # ACP V3: do not advertise methods the server cannot dispatch. Keep
+    # Crew-only legacy/internal handlers unadvertised instead of inventing parity.
+    import runpy
+    acp_audit = runpy.run_path(str(ROOT / "scripts" / "acp_capability_audit.py"))
+    _acp_report, acp_errors = acp_audit["audit_contract"](ROOT)
+    if acp_errors:
+        print("FAIL: ACP capability contract: " + "; ".join(acp_errors), file=sys.stderr)
+        return 24
+
+    # V9: extracted leaf modules must not reverse-depend on ACP / Turn Runner.
+    try:
+        boundary_errors = runpy.run_path(
+            str(ROOT / "scripts" / "boundary_guard.py"), run_name="_byo_boundary_guard"
+        )["check"](ROOT)
+    except (OSError, SyntaxError, ValueError) as exc:
+        print(f"FAIL: dependency boundary verification unavailable: {exc}", file=sys.stderr)
+        return 24
+    if boundary_errors:
+        print("FAIL: architecture boundary drift: " + "; ".join(boundary_errors), file=sys.stderr)
+        return 24
 
     hygiene_error = _source_hygiene_release_check()
     if hygiene_error:

@@ -36,8 +36,12 @@ def test_names_distinguish_list_from_chat_and_keep_other_models_unchanged():
     assert 'settingsDefaultActive' in js
     assert 'data-multi-select-option' in js
     assert 'data-kiro-byo-crew11-type-first' in js
-    assert 'location.reload' not in js
-    assert 'window.fetch' not in js
+    # The deliberate mode-change fallback may reload ONLY after verifying all
+    # Crew slots are idle; it must not rewrite React's model IDs.
+    assert "fetch('/api/chat/slots'" in js
+    assert "typeof slot.running === 'boolean'" in js
+    assert 'window.location.reload()' in js
+    assert 'window.fetch =' not in js
 
 
 def test_discovery_is_idempotent_and_keeps_hashed_assets_untouched(tmp_path):
@@ -134,7 +138,7 @@ const document = {
   createTreeWalker: () => ({nextNode:(()=>{let used=false;return ()=>{if(used)return null;used=true;return status;};})()})
 };
 vm.runInNewContext(fs.readFileSync(process.argv[2],'utf8'),{
-  document,window:{requestAnimationFrame:fn=>fn()},
+  document,window:{requestAnimationFrame:fn=>fn(),setInterval:()=>1,clearInterval:()=>{},addEventListener:()=>{}},
   NodeFilter:{SHOW_TEXT:4},MutationObserver:class{observe(){}}
 });
 if(menuText.nodeValue!=='Sky Type')throw Error('menu label '+menuText.nodeValue);
@@ -161,7 +165,7 @@ def test_real_crew11_picker_and_settings_dom_seams(tmp_path):
     assert 'auto isolation' in r.stdout
 
 
-def test_mate_model_picker_full_labels_and_wire_identity(tmp_path):
+def test_mate_model_picker_short_labels_and_wire_identity(tmp_path):
     """The two Mate 2.0 editors share agents.model, not Settings' model control."""
     shell = fix.block()
     script = re.search(r'<script[^>]*>(.*?)</script>', shell, re.S).group(1)
@@ -171,3 +175,12 @@ def test_mate_model_picker_full_labels_and_wire_identity(tmp_path):
     result = subprocess.run(['node', str(fixture), str(js_path)], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert 'Mate model trigger' in result.stdout
+
+
+def test_missing_current_app_timing_asset_is_actionable_and_does_not_modify_crew(tmp_path):
+    package = _dashboard(tmp_path)
+    index = package / 'static/dist/index.html'
+    before = index.read_bytes()
+    with pytest.raises(DashboardPatchError, match='dashboard resource missing or unreadable'):
+        fix.discover_dashboard_patches(package, timing_asset=tmp_path / 'no-such.js')
+    assert index.read_bytes() == before

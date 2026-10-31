@@ -22,6 +22,8 @@
     "src/kiro_crew/dashboard/chat_api/slot_effort.py",
     "src/kiro_crew/dashboard/chat_handlers.py",
     "src/kiro_crew/dashboard/chat_title.py",
+    "src/kiro_crew/dashboard/chat_turn/turn_dispatch_gates.py",
+    "src/kiro_crew/dashboard/chat_turn/turn_stats.py",
     "src/kiro_crew/acp/harness/kiro_byo.py"
   ]
 }

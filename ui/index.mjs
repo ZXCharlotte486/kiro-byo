@@ -3,6 +3,7 @@ import { useTheme } from '@kirocrew/app-sdk'
 
 const APP='kiro-byo'
 const API=`/api/apps/${APP}`
+const UI_ICON_URL=new URL('./icon.svg',import.meta.url).href
 
 // Kiro BYO owns its UI language; ACP sessions and model language policy do not.
 const UI_LOCALES=['zh-CN','zh-TW','en','ja','ko']
@@ -54,7 +55,7 @@ const CSS=`
 .ka-root[data-ka-scheme="dark"]{color-scheme:dark;--ka-muted:color-mix(in srgb,var(--ka-text) 64%,var(--bg))}
 .ka-root *{box-sizing:border-box}.ka-root button,.ka-root input,.ka-root textarea{font:inherit}.ka-root button{color:inherit}.ka-app{height:100%;min-height:0;display:flex;overflow:hidden}
 .ka-side{flex:0 0 248px;min-width:0;display:flex;flex-direction:column;gap:3px;padding:16px 11px 22px;border-right:1px solid var(--ka-border);background:color-mix(in srgb,var(--bg) 93%,var(--ka-surface));overflow:hidden}.ka-side-navwrap{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;padding-bottom:12px}.ka-side-navwrap .ka-nav{min-height:max-content}
-.ka-brand{display:flex;align-items:center;gap:10px;padding:3px 8px 13px;border:0;background:transparent;text-align:left;border-radius:10px;cursor:pointer}.ka-brand:hover{background:var(--ka-hover)}.ka-logo{width:36px;height:36px;border-radius:10px;background:var(--ka-accent);color:var(--ka-accent-fg);display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:800}.ka-brand-copy b{display:block;font-size:15px}.ka-brand-copy small{display:block;font-size:10px;color:var(--ka-muted);margin-top:2px}
+.ka-brand{display:flex;align-items:center;gap:10px;padding:3px 8px 13px;border:0;background:transparent;text-align:left;border-radius:10px;cursor:pointer}.ka-brand:hover{background:var(--ka-hover)}.ka-logo{width:68px;height:36px;flex-shrink:0;display:flex;align-items:center;justify-content:center}.ka-logo img{width:100%;height:100%;display:block;object-fit:contain}.ka-brand-copy b{display:block;font-size:15px}.ka-brand-copy small{display:block;font-size:10px;color:var(--ka-muted);margin-top:2px}
 .ka-side-status{margin:0 5px 7px;padding:9px 5px;border-top:1px solid var(--ka-border-soft);border-bottom:1px solid var(--ka-border-soft)}.ka-health-line{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11px}.ka-health-line strong{font-size:12px}.ka-quick{display:grid;grid-template-columns:1fr 1fr;gap:4px 9px;margin-top:7px;color:var(--ka-muted);font-size:10px}.ka-quick b{color:var(--ka-text)}.ka-quick b.ka-err{color:var(--ka-danger)}
 .ka-nav-title{font-size:9px;letter-spacing:.12em;color:var(--ka-muted);padding:9px 9px 5px}.ka-nav{display:flex;flex-direction:column;gap:2px;min-height:0}.ka-navbtn{position:relative;display:flex;align-items:center;gap:9px;padding:8px 9px;border:0;border-radius:9px;background:transparent;color:var(--ka-muted);cursor:pointer;text-align:left;font-size:12px}.ka-navbtn:hover{background:var(--ka-hover);color:var(--ka-text)}.ka-navbtn.on{background:color-mix(in srgb,var(--ka-accent) 13%,transparent);color:var(--ka-text);font-weight:700}.ka-navbtn.on:before{content:"";position:absolute;left:2px;top:50%;transform:translateY(-50%);height:20px;width:3px;background:var(--ka-accent);border-radius:999px}.ka-navbtn.on .ka-ic{color:var(--ka-accent)}.ka-navbtn:focus-visible{outline:2px solid var(--ka-accent);outline-offset:2px}.ka-ic{width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;flex:0 0 18px}.ka-ic svg{display:block;width:18px;height:18px}.ka-side-config{margin-top:0;border:1px solid var(--ka-border);border-radius:12px;background:var(--ka-surface);padding:13px 12px;min-width:0;flex:0 0 auto}.ka-side-config-title{font-size:12px;font-weight:750;margin-bottom:11px;display:flex;align-items:center;justify-content:space-between;gap:5px}.ka-side-config-title .ka-chip{font-weight:600}.ka-side-config-label{font-size:10px;color:var(--ka-muted);margin-bottom:3px}.ka-side-config-mode{font-size:15px;font-weight:750;line-height:1.35;overflow-wrap:anywhere}.ka-side-config-pack{font-size:10px;color:var(--ka-muted);margin-top:2px}.ka-side-config-desc{margin-top:9px;font-size:10px;line-height:1.6;color:var(--ka-muted);overflow-wrap:anywhere}.ka-side-config-facts{display:grid;grid-template-columns:1fr;gap:7px;margin:11px 0}.ka-side-config-row{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;font-size:10px;line-height:1.35}.ka-side-config-row span:first-child{color:var(--ka-muted);flex:0 0 48px}.ka-side-config-row strong{font-weight:650;text-align:right;overflow-wrap:anywhere}.ka-side-config-divider{height:1px;background:var(--ka-border-soft);margin:11px 0}.ka-side-config-integration{display:flex;align-items:center;gap:6px;font-size:10px}.ka-side-config-tools{font-size:9px;color:var(--ka-muted);margin:3px 0 0 13px}.ka-side-config-link{display:block;width:100%;margin-top:11px;padding:8px 10px;border:1px solid var(--ka-border);background:var(--ka-surface-2);border-radius:8px;color:var(--ka-text);font-size:10px;text-align:left;cursor:pointer}.ka-side-config-link:hover{background:var(--ka-hover)}
 .ka-main{flex:1 1 auto;min-width:0;min-height:0;overflow:hidden;padding:20px 26px 22px}.ka-shell{height:100%;min-height:0;max-width:1220px;margin:0 auto;display:flex;flex-direction:column;overflow:hidden}.ka-page-head{flex:0 0 auto;display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:13px}.ka-page-copy h1{margin:0 0 3px;font-size:22px;line-height:1.2}.ka-page-copy p{margin:0;color:var(--ka-muted);font-size:11px}.ka-page-actions{display:flex;align-items:center;gap:7px}.ka-content{flex:1 1 auto;min-height:0;overflow:hidden}.ka-page{height:100%;min-height:0;display:flex;flex-direction:column;gap:10px;overflow:hidden}
@@ -77,6 +78,7 @@ const CSS=`
 .ka-type-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;flex:0 0 auto}.ka-type-card{border:1px solid var(--ka-border);background:var(--ka-surface);border-radius:11px;padding:10px;text-align:left;cursor:pointer}.ka-type-card.ka-preview-type{cursor:default;opacity:.65;background:var(--ka-surface-2)}.ka-mode-preview{border-top:1px solid var(--ka-border-soft);padding-top:11px;display:flex;flex-direction:column;gap:7px}.ka-mode-preview-title{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700}.ka-mode-preview-title span{font-size:10px;color:var(--ka-warn)}.ka-mode-preview .ka-type-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.ka-type-card.on{border-color:color-mix(in srgb,var(--ka-accent) 58%,var(--ka-border));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--ka-accent) 20%,transparent)}.ka-type-name{font-size:11px;font-weight:750}.ka-type-desc{height:27px;margin-top:4px;font-size:8px;color:var(--ka-muted);overflow:hidden}.ka-type-meta{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px}.ka-mode-page{overflow:hidden}.ka-mode-page .ka-mode-body{flex:1 1 auto;min-height:0;height:auto}.ka-mode-body{display:grid;grid-template-columns:minmax(250px,.75fr) minmax(0,1.65fr);gap:10px;flex:1;min-height:0}.ka-profile-bars{display:flex;flex-direction:column;gap:7px}.ka-bar-row{display:grid;grid-template-columns:76px minmax(0,1fr) 34px;gap:8px;align-items:center;font-size:9px}.ka-bar{height:6px;background:var(--ka-surface-2);border-radius:999px;overflow:hidden}.ka-bar i{display:block;height:100%;background:var(--ka-accent);border-radius:999px}.ka-plan{height:100%;display:flex;align-items:center;justify-content:center}.ka-plan-inner{display:flex;flex-direction:column;align-items:center;gap:7px;width:100%}.ka-plan-node{min-width:118px;max-width:180px;border:1px solid var(--ka-border);border-radius:9px;padding:7px 9px;text-align:center;background:var(--ka-surface);font-size:9px}.ka-plan-node b{display:block;font-size:10px}.ka-plan-children{display:flex;gap:8px;justify-content:center;max-width:100%;flex-wrap:wrap}.ka-arrow{color:var(--ka-muted);font-size:13px;line-height:1}
 .ka-mode-detail .ka-panel-head p{min-height:27px;max-width:280px}.ka-mode-kv{grid-template-columns:72px minmax(0,1fr);gap:7px 12px}.ka-mode-usage-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border:1px solid var(--ka-border-soft);border-radius:10px;overflow:hidden}.ka-mode-usage-stat{padding:9px 10px;border-right:1px solid var(--ka-border-soft);display:flex;flex-direction:column;gap:2px}.ka-mode-usage-stat:last-child{border-right:0}.ka-mode-usage-stat span{font-size:9px;color:var(--ka-muted)}.ka-mode-usage-stat b{font-size:14px}.ka-usage-list{display:flex;flex-direction:column;gap:9px;margin-top:9px}.ka-usage-row{display:grid;grid-template-columns:minmax(130px,1.15fr) minmax(120px,1.6fr) 38px 46px;gap:9px;align-items:center;font-size:9px}.ka-usage-name{font-size:10px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ka-usage-pct{text-align:right;font-weight:700}.ka-usage-count{text-align:right;white-space:nowrap}.ka-recent-calls{display:flex;flex-direction:column;margin-top:7px}.ka-recent-call{display:grid;grid-template-columns:62px minmax(130px,1fr) 40px 62px;gap:9px;align-items:center;padding:7px 0;border-bottom:1px solid var(--ka-border-soft);font-size:9px}.ka-recent-call:last-child{border-bottom:0}.ka-recent-model{font-size:10px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ka-recent-duration{text-align:right;white-space:nowrap}.ka-window-note{font-size:9px}.ka-mode-empty{margin-top:9px;padding:18px 10px;border:1px dashed var(--ka-border);border-radius:9px;text-align:center;color:var(--ka-muted);font-size:9px}.ka-mode-empty.compact{padding:11px 10px}
 .ka-mode-select{width:112px}.ka-mode-select .ka-select-trigger{position:relative;justify-content:center;min-height:42px;font-size:13px;padding:9px 28px 9px 12px}.ka-mode-select .ka-select-arrow{position:absolute;right:10px;top:50%;transform:translateY(-50%)}
+.ka-record-kind{display:inline-flex;align-items:center;border:1px solid var(--ka-border);border-radius:6px;padding:2px 6px;font-size:10px;font-weight:700;color:var(--ka-muted)}.ka-record-scope{flex:0 0 auto;padding:7px 10px;font-size:10px;line-height:1.4}
 .ka-record-page .ka-metrics{flex:0 0 auto}.ka-record-usage{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));border:1px solid var(--ka-border);border-radius:11px;overflow:hidden;flex:0 0 auto}.ka-record-usage>div{padding:10px 12px;border-right:1px solid var(--ka-border-soft)}.ka-record-usage>div:last-child{border-right:0}.ka-record-usage span{display:block;font-size:10px;color:var(--ka-muted)}.ka-record-usage b{display:block;font-size:15px;margin-top:2px}.ka-record-list{display:flex;flex-direction:column;gap:9px;padding-right:2px}.ka-record-card{padding:13px 14px}.ka-record-card-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.ka-record-route{font-size:14px;font-weight:750;margin-top:7px}.ka-record-meta{display:flex;gap:13px;flex-wrap:wrap;margin-top:6px;color:var(--ka-muted);font-size:11px}.ka-record-routing{display:flex;flex-direction:column;gap:10px;padding-right:2px}.ka-route-card{padding:14px}.ka-route-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 18px;margin-top:10px}.ka-route-fact .k{font-size:10px;color:var(--ka-muted)}.ka-route-fact .v{font-size:12px;font-weight:650;margin-top:2px;overflow-wrap:anywhere}.ka-route-signals{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-top:10px}.ka-route-signal{padding:8px 9px;background:var(--ka-surface-2);border-radius:8px}.ka-route-signal span{display:block;font-size:9px;color:var(--ka-muted)}.ka-route-signal b{display:block;font-size:12px;margin-top:2px}.ka-route-candidates{margin-top:10px;border-top:1px solid var(--ka-border-soft)}.ka-route-candidate{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(100px,.8fr) 70px;gap:10px;padding:7px 2px;border-bottom:1px solid var(--ka-border-soft);font-size:10px}.ka-route-candidate.selected{font-weight:700;color:var(--ka-ok)}.ka-record-empty{padding:28px 16px;text-align:center;color:var(--ka-muted);font-size:12px}.ka-raw-event{margin-top:10px}.ka-raw-event summary{cursor:pointer;font-size:10px;color:var(--ka-muted)}.ka-raw-event pre{white-space:pre-wrap;word-break:break-word;font-size:9px;line-height:1.45;padding:9px;border-radius:8px;background:var(--ka-surface-2);overflow:auto;max-height:260px}.ka-record-card.clickable{cursor:pointer}.ka-record-card.clickable:hover{border-color:color-mix(in srgb,var(--ka-accent) 42%,var(--ka-border));background:color-mix(in srgb,var(--ka-accent) 4%,var(--ka-surface))}.ka-record-more{margin-left:auto;color:var(--ka-accent);font-weight:650}.ka-record-table-row{cursor:pointer}.ka-record-table-row:hover td{background:var(--ka-hover)}.ka-record-drawer-backdrop{position:absolute;inset:0;z-index:40;background:rgba(0,0,0,.12);display:flex;justify-content:flex-end}.ka-record-drawer{width:min(430px,46%);height:100%;background:var(--ka-surface);border-left:1px solid var(--ka-border);box-shadow:-12px 0 30px rgba(0,0,0,.12);padding:16px;display:flex;flex-direction:column;gap:12px;overflow:auto}.ka-record-drawer-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.ka-record-drawer-head h2{font-size:18px;margin:0}.ka-record-failure{padding:10px 11px;border:1px solid color-mix(in srgb,var(--ka-danger) 38%,var(--ka-border));border-radius:9px;background:color-mix(in srgb,var(--ka-danger) 7%,var(--ka-surface));color:var(--ka-danger);font-size:11px;line-height:1.5;overflow-wrap:anywhere}.ka-record-failure strong{display:block;margin-bottom:3px}.ka-record-drawer-section{border-top:1px solid var(--ka-border-soft);padding-top:11px}.ka-record-drawer-section h3{margin:0 0 8px;font-size:13px}.ka-record-detail-grid{display:grid;grid-template-columns:120px minmax(0,1fr);gap:7px 12px;font-size:11px}.ka-record-detail-grid .k{color:var(--ka-muted)}.ka-record-detail-grid .v{font-weight:600;overflow-wrap:anywhere}.ka-record-trace{display:flex;flex-direction:column;gap:7px}.ka-record-trace-row{display:grid;grid-template-columns:44px minmax(0,1fr) auto;gap:8px;align-items:start;padding:7px 0;border-bottom:1px solid var(--ka-border-soft);font-size:10px}.ka-record-trace-row:last-child{border-bottom:0}.ka-record-trace-row .seq{color:var(--ka-muted)}.ka-record-trace-row .event{font-weight:650}.ka-record-trace-row .event.ka-err{color:var(--ka-danger)}.ka-record-trace-row .time{color:var(--ka-muted);white-space:nowrap}.ka-record-trace-row details{grid-column:2/-1}.ka-record-trace-row pre{white-space:pre-wrap;word-break:break-word;font-size:9px;line-height:1.45;background:var(--ka-surface-2);padding:8px;border-radius:7px;max-height:220px;overflow:auto}
 .ka-settings{display:grid;grid-template-columns:minmax(0,220px) minmax(0,1fr);gap:12px;flex:1;min-height:0;min-width:0}.ka-settings>.ka-panel{min-width:0}.ka-settings .ka-panel-body,.ka-settings .ka-scroll{min-width:0}.ka-settings .ka-kv{grid-template-columns:minmax(0,1fr) minmax(0,1.7fr)}.ka-settings .ka-kv dt,.ka-settings .ka-kv dd{overflow-wrap:anywhere}.ka-settings .ka-between{min-width:0;flex-wrap:wrap}.ka-settings .ka-between>*{min-width:0}.ka-settings .ka-setting-row{grid-template-columns:minmax(0,.85fr) minmax(0,1fr);gap:clamp(10px,2vw,24px)}.ka-settings .ka-setting-row>*{min-width:0;max-width:100%}.ka-settings .ka-setting-row .name,.ka-settings .ka-setting-row .desc{overflow-wrap:anywhere}.ka-settings .ka-setting-row .ka-btn{min-width:0;max-width:100%;white-space:normal;overflow-wrap:anywhere}.ka-settings .ka-panel{padding:16px}.ka-settings .ka-panel-head{margin-bottom:13px}.ka-settings .ka-panel-head h2{font-size:16px}.ka-settings .ka-panel-head p{font-size:12px}.ka-setting-nav{display:flex;flex-direction:column;gap:4px}.ka-setting-nav-divider{height:1px;background:var(--ka-border-soft);margin:10px 6px}.ka-setting-nav button{border:0;background:transparent;border-radius:9px;padding:10px 11px;text-align:left;color:var(--ka-muted);cursor:pointer;font-size:13px;line-height:1.35}.ka-setting-nav button.on{background:color-mix(in srgb,var(--ka-accent) 11%,transparent);color:var(--ka-text);font-weight:700}.ka-setting-row{display:grid;grid-template-columns:minmax(240px,.8fr) minmax(220px,1fr);gap:28px;align-items:center;padding:14px 2px;border-bottom:1px solid var(--ka-border-soft)}.ka-setting-row:last-child{border-bottom:0}.ka-setting-row .name{font-size:14px;font-weight:700}.ka-setting-row .desc{font-size:12px;line-height:1.5;color:var(--ka-muted);margin-top:3px}.ka-settings .ka-chip{font-size:12px;padding:5px 9px}.ka-settings .ka-btn{font-size:12px;padding:8px 11px}.ka-settings .ka-btn.small{font-size:11px}.ka-settings .ka-select-trigger{font-size:13px;padding:9px 11px}.ka-settings .ka-select-option{font-size:12px;padding:9px 10px}.ka-settings .ka-note{font-size:12px;line-height:1.55;padding:10px 11px}.ka-settings .ka-card-title{font-size:14px}.ka-settings .ka-muted{line-height:1.45}.ka-settings .ka-kv{font-size:12px;gap:9px 16px}.ka-settings .ka-check{font-size:12px;padding:8px 0}
 .ka-account-page .ka-metric{padding:13px 15px}.ka-account-page .ka-metric .k{font-size:11px}.ka-account-page .ka-metric .v{font-size:21px;margin-top:3px}.ka-account-page .ka-panel{padding:16px}.ka-account-page .ka-panel-head h2{font-size:16px}.ka-account-page .ka-panel-head p{font-size:12px;line-height:1.5}.ka-account-page .ka-btn{font-size:12px;padding:8px 12px}.ka-account-list{display:flex;flex-direction:column;gap:12px;padding-right:2px}.ka-account-provider{padding:15px 16px;border-radius:12px}.ka-account-provider-name{font-size:15px;font-weight:750}.ka-account-provider-url{font-size:11px;color:var(--ka-muted);margin-top:3px}.ka-account-provider .ka-badge{font-size:11px;padding:5px 9px}.ka-account-balance{margin-top:13px;padding:14px;border:1px solid var(--ka-border-soft);border-radius:10px;background:var(--ka-surface-2)}.ka-account-balance-label{font-size:11px;color:var(--ka-muted)}.ka-account-balance-total{font-size:24px;font-weight:760;line-height:1.2;margin-top:3px}.ka-account-balance-grid{display:grid;grid-template-columns:repeat(2,minmax(0,220px));gap:10px;margin-top:13px}.ka-account-balance-cell{padding:10px 12px;border:1px solid var(--ka-border-soft);border-radius:9px;background:var(--ka-surface)}.ka-account-balance-cell span{display:block;font-size:11px;color:var(--ka-muted)}.ka-account-balance-cell b{display:block;font-size:15px;margin-top:3px}.ka-account-foot{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:11px;font-size:11px;color:var(--ka-muted)}.ka-account-unsupported{margin-top:13px;padding:12px 13px;border-radius:9px;background:var(--ka-surface-2);font-size:12px;line-height:1.55}.ka-account-unsupported b{display:block;font-size:13px;color:var(--ka-text);margin-bottom:3px}.ka-account-unsupported b.ka-err{color:var(--ka-danger)}.ka-account-quota-list{display:flex;flex-direction:column;gap:10px;margin-top:13px}.ka-account-quota-model{padding:13px 14px;border:1px solid var(--ka-border-soft);border-radius:10px;background:var(--ka-surface-2)}.ka-account-quota-model>strong{font-size:14px}.ka-account-quota-windows{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:10px}.ka-account-quota-window{padding:10px 12px;border:1px solid var(--ka-border-soft);border-radius:9px;background:var(--ka-surface)}.ka-account-quota-window .head{display:flex;justify-content:space-between;gap:10px;align-items:center;font-size:12px}.ka-account-quota-window .head b{font-size:14px}.ka-account-quota-window .bar{height:7px;background:var(--ka-surface-2);border-radius:999px;overflow:hidden;margin-top:8px}.ka-account-quota-window .bar i{display:block;height:100%;background:var(--ka-accent);border-radius:999px}.ka-account-quota-window .meta{display:flex;justify-content:space-between;gap:10px;margin-top:7px;font-size:10px;color:var(--ka-muted)}.ka-account-summary-note{padding:11px 13px;border:1px solid var(--ka-border-soft);border-radius:9px;background:var(--ka-surface-2);font-size:11px;color:var(--ka-muted)}
@@ -132,6 +134,13 @@ function injectStyles(){if(document.getElementById('kiro-byo-app-style'))return;
 injectStyles()
 
 async function api(path,options={}){const r=await fetch(`${API}${path}`,{headers:{'Content-Type':'application/json',...(options.headers||{})},...options});const text=await r.text();let data={};try{data=text?JSON.parse(text):{}}catch(_){data={error:text||`HTTP ${r.status}`}}if(!r.ok)throw new Error(data.code&&ERROR_CODES[data.code]?`${tr('error.'+data.code)} — ${data.error||''}`:data.error||`HTTP ${r.status}`);return data}
+// Cross-surface notification only. Crew owns model selection and its query cache.
+// The event never rewrites a concrete model pin or a running ACP session.
+function notifyCrewModeChanged(mode){
+  const message={kind:'catalog-changed',mode:String(mode||'').toLowerCase()};
+  try{window.dispatchEvent(new CustomEvent('kiro-byo:catalog-changed',{detail:message}))}catch(_){/* embedded host may isolate events */}
+  try{const channel=new BroadcastChannel('kiro-byo:mode-catalog');channel.postMessage(message);channel.close()}catch(_){/* older WebViews */}
+}
 function ms(v){const n=Number(v||0);if(!Number.isFinite(n)||n<=0)return '—';return n>=1000?tr("ui.0cc05a38ad9b",{v0:((n/1000).toFixed(n>=10000?1:2))}):`${Math.round(n)} ms`}
 function nfmt(v){const n=Number(v||0);return Number.isFinite(n)?n.toLocaleString():'0'}
 function reportedNumber(row,key,flag=''){if(!row||!Object.prototype.hasOwnProperty.call(row,key))return '—';if(flag&&!row[flag]&&Number(row[key]||0)===0)return '—';const n=Number(row[key]);return Number.isFinite(n)?n.toLocaleString():'—'}
@@ -674,6 +683,12 @@ function ModesPage({router,onReload}){
   const [viewingType,setViewingType]=useState(defaultType)
   const viewingPackRef=useRef(packId)
   const [error,setError]=useState('')
+  const [hostSyncProbe,setHostSyncProbe]=useState(null)
+  useEffect(()=>{
+    let alive=true
+    api('/mode-sync').then(value=>{if(alive)setHostSyncProbe(value)}).catch(()=>{if(alive)setHostSyncProbe(null)})
+    return ()=>{alive=false}
+  },[packId])
   const load=useCallback(async()=>{try{setRouting(await api('/routing'));setError('')}catch(e){setError(e.message)}},[])
   useEffect(()=>{load()},[load,packId])
 
@@ -683,11 +698,11 @@ function ModesPage({router,onReload}){
     if(viewingPackRef.current!==packId){viewingPackRef.current=packId;setViewingType(defaultType);return}
     setViewingType(prev=>policies.some(p=>p.id===prev)?prev:defaultType)
   },[packId,policyIds,defaultType])
-  const liveMap=new Map((routing?.policies||[]).map(p=>[p.id,p]))
-  const selected=viewingType||defaultType
+  const liveMap=new Map(((routing?.pack===packId?routing?.policies:[])||[]).map(p=>[p.id,p]))
+  const selected=policies.some(p=>p.id===viewingType)?viewingType:defaultType
   const policy=liveMap.get(selected)||policies.find(p=>p.id===selected)||{}
   const currentId=policy.id||selected
-  const recent=(routing?.recent_routes||[]).find(r=>r.policy===currentId)||null
+  const recent=((routing?.pack===packId?routing?.recent_routes:[])||[]).find(r=>r.pack===packId&&r.policy===currentId)||null
   const workerMode=String(policy.worker_mode||'none')
   const splitText=workerMode==='always'?tr("ui.7964d1818505"):workerMode==='adaptive'?tr("ui.74b0d1125be7"):tr("ui.6246c440c794")
   const splitCard=workerMode==='always'?tr("ui.fb68dd52a529"):workerMode==='adaptive'?tr("ui.4811f962a0f6"):tr("ui.6b0e2c811656")
@@ -707,7 +722,21 @@ function ModesPage({router,onReload}){
   const usage=policy?.recent_usage||{window_hours:60,turns:0,success:0,failed:0,other:0,models:[],recent_calls:[]}
   const usageModels=Array.isArray(usage.models)?usage.models:[]
   const recentCalls=Array.isArray(usage.recent_calls)?usage.recent_calls:[]
-  const changePack=async value=>{try{await api('/mode',{method:'PUT',body:JSON.stringify({mode:value})});await onReload();await load()}catch(e){alert(e.message)}}
+  const changePack=async value=>{try{
+    const result=await api('/mode',{method:'PUT',body:JSON.stringify({mode:value})});
+    notifyCrewModeChanged(result.mode?.pack||value);
+    await onReload();await load();
+    // The Mode write is already committed. A missing host sync is a real
+    // compatibility problem, not a successful conversation migration.
+    const sync=String(result.host_sync||'host_sync_unavailable');
+    if(sync==='host_unavailable'||sync==='host_sync_unavailable'){
+      alert(tOptional('mode.host_sync_unavailable',
+        'Mode saved, but the KiroCrew chat session could not be synchronized. Check that the BYO integration patch is installed and restart KiroCrew.'));
+    }else if(sync==='pending'){
+      alert(tOptional('mode.host_sync_pending',
+        'Mode saved. Some active or protected chat sessions are still using the previous Type. They will migrate when safely idle.'));
+    }
+  }catch(e){alert(e.message)}}
 
   const content=h('div',{className:'ka-mode-body'},
     h(Panel,{title:policy.display_name||modeZh(currentId)||currentId,description:localizedType(packId,currentId,'short',policy.short_description||policy.description||''),className:'fill ka-mode-detail'},
@@ -783,6 +812,12 @@ function ModesPage({router,onReload}){
       )
     })),
     error?h('div',{className:'ka-err'},error):null,
+    hostSyncProbe?.catalogue_comparison==='mismatch'
+      ?h('div',{className:'ka-err'},
+        `BYO 与 Crew 模型目录配置不同步：BYO ${hostSyncProbe.app_mode?.pack||'—'}，Crew ${hostSyncProbe.crew_catalog_mode?.pack||'—'}。请检查安装集成及配置目录。`)
+      :hostSyncProbe?.installed_host_patches?.mode_watch_script===false
+      ?h('div',{className:'ka-err'},'Crew 仍在使用旧版模型同步补丁。请重新应用 BYO 集成并完全重启 KiroCrew。')
+      :null,
     content
   )
 }
@@ -848,9 +883,11 @@ function TasksPage({onNavigate}){
   const editable=byoSelected&&!error
   const backendName=id=>id==='kiro-byo'?'BYO':id==='kas'?'Kiro Agent':id==='kiro'?'Kiro CLI':id==='unknown'?'—':id||'—'
   const known=new Set(models.map(m=>m.id))
-  const extra=value=>value&&value!=='auto'&&!known.has(value)?[{value,label:`${value} · ${tr('linkage.foreign_model')}`}]:[]
-  const optionsForTask=t=>[{value:'',label:tr('linkage.inherit_model')},...extra(t.model),...models.map(m=>({value:m.id,label:m.name||m.id}))]
-  const optionsForBackground=[{value:'auto',label:'Auto'},...extra(background.model),...models.map(m=>({value:m.id,label:m.name||m.id}))]
+  // Only the active BYO catalogue is selectable.  Historical Crew pins from
+  // the official Harness are displayed separately, never reinserted as choices.
+  const foreignPin=value=>!!value&&value!=='auto'&&!known.has(value)
+  const optionsForTask=[{value:'',label:tr('linkage.inherit_model')},...models.map(m=>({value:m.id,label:m.name||m.id}))]
+  const optionsForBackground=[{value:'auto',label:'Auto'},...models.map(m=>({value:m.id,label:m.name||m.id}))]
   const modelLabel=value=>{const id=String(value||'').trim();if(!id)return tr('linkage.inherit_model');if(id==='auto')return 'Auto';return models.find(m=>m.id===id)?.name||id}
   const update=async(key,url,payload)=>{
     setBusy(key);setWriteError('')
@@ -861,7 +898,7 @@ function TasksPage({onNavigate}){
   const statusText=t=>!t.enabled?tr('ui.6c7dcbb73a59'):t.last_status==='ok'?tr('ui.35b15d3f3fdc'):t.last_status==='error'?tr('ui.ec2121fd63ee'):tr('ui.2c77b2ddf86e')
   const contextValue=t=>t.persistent_session?(t.minimal_context?'persistent-minimal':'persistent'):(t.minimal_context?'fresh-minimal':'fresh')
   const contextOptions=[{value:'persistent',label:tr('ui.938b6631e4bb')},{value:'persistent-minimal',label:tr('ui.6df3ba61c9d8')},{value:'fresh',label:tr('ui.c1e5d05abcf4')},{value:'fresh-minimal',label:tr('ui.1a1e4a39a272')}]
-  const saveContext=(t,v)=>update(`context:${t.id}`,`/tasks/${encodeURIComponent(t.id)}/execution`,{persistent_session:v.startsWith('persistent'),minimal_context:v.endsWith('minimal')})
+  const saveContext=(t,v)=>update(`context:${t.id}`,`/tasks/${encodeURIComponent(t.id)}/execution`,{persistent_session:v.startsWith('persistent'),minimal_context:v.endsWith('minimal'),expected_persistent_session:t.persistent_session,expected_minimal_context:t.minimal_context})
   const taskCard=t=>{
     const noModel=t.execution_kind==='script'||t.execution_kind==='command'
     return h('article',{className:'ka-card ka-task-console-job',key:t.id},
@@ -874,12 +911,15 @@ function TasksPage({onNavigate}){
           h('div',{className:'ka-task-field-label'},tr('ui.f86c1057e625')),
           h('div',{className:'ka-task-console-helper'},noModel?tr('linkage.no_acp_model'):t.model?tr('task_console.explicit'):tr('task_console.inherited'))
         ),
-        noModel?h('span',{className:'ka-chip'},tr('linkage.no_acp_model')):h(KSelect,{
-          value:t.model||'',options:optionsForTask(t),
-          disabled:!editable||!!busy,onChange:v=>update(`model:${t.id}`,`/tasks/${encodeURIComponent(t.id)}/model`,{model:v,expected_model:t.model||''}),
-          ariaLabel:`${t.name||t.id} model`
-        })
+        noModel?h('span',{className:'ka-chip'},tr('linkage.no_acp_model')):!byoSelected?
+          h('span',{className:'ka-chip'},modelLabel(t.model)):
+          h(KSelect,{
+            value:t.model||'',options:optionsForTask,placeholder:tr('linkage.foreign_model'),
+            disabled:!editable||!!busy,onChange:v=>update(`model:${t.id}`,`/tasks/${encodeURIComponent(t.id)}/model`,{model:v,expected_model:t.model||''}),
+            ariaLabel:`${t.name||t.id} model`
+          })
       ),
+      !noModel&&byoSelected&&foreignPin(t.model)?h('div',{className:'ka-task-console-helper ka-err'},`${tr('linkage.foreign_model')}: ${t.model}`):null,
       !noModel?h('details',{className:'ka-task-console-details'},
         h('summary',null,tr('task_console.advanced')),
         h('div',{className:'ka-task-console-advanced'},
@@ -910,8 +950,10 @@ function TasksPage({onNavigate}){
           h('article',{className:'ka-card ka-task-console-background'},
             h('div',{className:'ka-task-console-model-row'},
               h('div',{className:'ka-task-console-model-copy'},h('div',{className:'ka-task-field-label'},tr('task_console.configured')),h('strong',null,modelLabel(background.model))),
-              h(KSelect,{value:background.model||'auto',disabled:!editable||!!busy,onChange:v=>update('background:model','/tasks/background-model',{model:v,expected_model:background.model||'auto'}),options:optionsForBackground,ariaLabel:tr('task_console.background')})
+              !byoSelected?h('span',{className:'ka-chip'},modelLabel(background.model)):
+                h(KSelect,{value:background.model||'auto',disabled:!editable||!!busy,placeholder:tr('linkage.foreign_model'),onChange:v=>update('background:model','/tasks/background-model',{model:v,expected_model:background.model||'auto'}),options:optionsForBackground,ariaLabel:tr('task_console.background')})
             ),
+            byoSelected&&foreignPin(background.model)?h('div',{className:'ka-task-console-helper ka-err'},`${tr('linkage.foreign_model')}: ${background.model}`):null,
             h('div',{className:'ka-task-console-helper'},`${tr('task_console.crew_resolved')}: ${modelLabel(background.resolved_model)} · ${tr('task_console.selection_not_execution')}`)
           )
         ),
@@ -930,14 +972,18 @@ function TasksPage({onNavigate}){
   )
 }
 
-function RecordsPage({data,trace,modeCatalog,onReload}){
+function RecordsPage({data,trace,records,modeCatalog,locale,onReload}){
   const [tab,setTab]=useState('all')
+  const recordWhen=ts=>{const n=Number(ts||0);if(!n)return '—';try{return new Date(n*1000).toLocaleTimeString(locale||'en',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}catch(_){return '—'}}
+  const recordNumber=v=>{const n=Number(v||0);return Number.isFinite(n)?n.toLocaleString(locale||'en'):'—'}
   const [busy,setBusy]=useState(false)
   const [selectedTurn,setSelectedTurn]=useState(null)
   const [detailTrace,setDetailTrace]=useState([])
   const [detailBusy,setDetailBusy]=useState(false)
   const [detailError,setDetailError]=useState('')
   const s=data?.summary||{}
+  const recordSummary=records?.summary||{}
+  const unifiedEvents=Array.isArray(records?.events)?records.events:[]
   const turns=(data?.turns||[]).slice().reverse()
   const runs=data?.runs||[]
   const events=trace?.events||[]
@@ -955,10 +1001,10 @@ function RecordsPage({data,trace,modeCatalog,onReload}){
   }
 
   const usage=h('div',{className:'ka-record-usage'},
-    h('div',null,h('span',null,tr("ui.e8850440f247")),h('b',null,Number.isFinite(Number(s.input_tokens))?nfmt(s.input_tokens):'—')),
-    h('div',null,h('span',null,tr("ui.ded698ae1e7e")),h('b',null,Number.isFinite(Number(s.output_tokens))?nfmt(s.output_tokens):'—')),
-    h('div',null,h('span',null,tr("ui.c9d3b085e2f4")),h('b',null,(s.reasoning_reported_turns||0)>0?nfmt(s.reasoning_tokens):'—')),
-    h('div',null,h('span',null,tr("ui.987b1086b2c4")),h('b',null,(s.cache_usage_reported_turns||0)>0?nfmt(s.cached_tokens):'—')),
+    h('div',null,h('span',null,tr("ui.e8850440f247")),h('b',null,Number.isFinite(Number(s.input_tokens))?recordNumber(s.input_tokens):'—')),
+    h('div',null,h('span',null,tr("ui.ded698ae1e7e")),h('b',null,Number.isFinite(Number(s.output_tokens))?recordNumber(s.output_tokens):'—')),
+    h('div',null,h('span',null,tr("ui.c9d3b085e2f4")),h('b',null,(s.reasoning_reported_turns||0)>0?recordNumber(s.reasoning_tokens):'—')),
+    h('div',null,h('span',null,tr("ui.987b1086b2c4")),h('b',null,(s.cache_usage_reported_turns||0)>0?recordNumber(s.cached_tokens):'—')),
     h('div',null,h('span',null,tr("ui.6b6d3e87d835")),h('b',null,s.cache_hit_rate==null?'—':pct(s.cache_hit_rate)))
   )
 
@@ -971,12 +1017,12 @@ function RecordsPage({data,trace,modeCatalog,onReload}){
     let type=t.mode_type&&t.mode_type!=='concrete'?`${catalogPackName(modeCatalog,t.mode_pack)} · ${catalogPolicyName(modeCatalog,t.mode_pack,t.mode_type).replace(/ Type$/,'')}`:tr("ui.74e2b536206b")
     if(backgroundSource){
       const match=requested.match(/^kiro-byo-type:([^:]+):([^:]+)$/)
-      type=match?`后台 · ${catalogPackName(modeCatalog,match[1])} · ${catalogPolicyName(modeCatalog,match[1],match[2])}`:'后台 · Auto'
+      type=match?`${tr('records.center.background')} · ${catalogPackName(modeCatalog,match[1])} · ${catalogPolicyName(modeCatalog,match[1],match[2])}`:`${tr('records.center.background')} · Auto`
     }
     const origin=t.outcome==='cancelled'?String(t.cancel_source||''):''
     return h('article',{className:'ka-card ka-record-card clickable',key:`${t.timestamp}-${t.session_id}`,onClick:()=>openDetail(t)},
       h('div',{className:'ka-record-card-head'},
-        h('div',{className:'ka-row'},dot(tone),h('b',null,when(t.started_at||((Number(t.timestamp||0))-(Number(t.total_ms||0)/1000)))),h('span',{className:'ka-muted'},'→',when(t.completed_at||t.timestamp)),h('span',{className:recovered?'ka-warn':ok?'ka-ok':'ka-err'},recovered&&ok?tr("ui.6aa9ad7241b5"):outcomeZh(t.outcome))),
+        h('div',{className:'ka-row'},dot(tone),h('b',null,recordWhen(t.started_at||((Number(t.timestamp||0))-(Number(t.total_ms||0)/1000)))),h('span',{className:'ka-muted'},'→',recordWhen(t.completed_at||t.timestamp)),h('span',{className:recovered?'ka-warn':ok?'ka-ok':'ka-err'},recovered&&ok?tr("ui.6aa9ad7241b5"):outcomeZh(t.outcome))),
         h('span',{className:'ka-muted'},ms(t.total_ms))
       ),
       h('div',{className:'ka-record-route'},`${type}  →  ${t.served_model||'—'}`),
@@ -993,18 +1039,28 @@ function RecordsPage({data,trace,modeCatalog,onReload}){
     )
   }
 
-  const all=h(Panel,{title:tr("ui.9f14a3f4dd5f"),className:'fill',action:h('button',{className:'ka-btn danger small',disabled:busy,onClick:clear},tr("ui.72c920773767"))},
-    turns.length?h('div',{className:'ka-scroll ka-record-list'},...turns.map(recordCard)):h('div',{className:'ka-record-empty'},tr("ui.37b58f32f4bd"))
+  const all=h(Panel,{title:tr('records.center.timeline'),description:tr('records.center.timeline_help'),className:'fill'},
+    unifiedEvents.length?h('div',{className:'ka-scroll ka-record-list'},...unifiedEvents.map((event,i)=>{
+      const linked=turns.find(t=>(event.turn_id&&t.turn_id===event.turn_id)||(event.run_id&&t.run_id===event.run_id))
+      const category=event.kind==='turn'?tr('records.center.turn'):event.kind==='routing'?tr('records.center.routing'):event.kind==='recovery'?tr('records.center.recovery'):tr('records.center.runtime')
+      const label=event.kind==='routing'?(event.mode&&event.type?`${event.mode} · ${event.type}`:event.event):event.kind==='turn'?outcomeZh(String(event.event||'').replace(/^turn\./,'')):event.event
+      return h('article',{className:`ka-card ka-record-card ${linked?'clickable':''}`,key:`${event.kind}-${event.timestamp}-${i}`,onClick:linked?()=>openDetail(linked):undefined},
+        h('div',{className:'ka-record-card-head'},h('div',{className:'ka-row'},h('span',{className:'ka-record-kind'},category),h('b',null,recordWhen(event.timestamp))),event.duration_ms!=null?h('span',{className:'ka-muted'},ms(event.duration_ms)):null),
+        h('div',{className:'ka-record-route'},label),
+        h('div',{className:'ka-record-meta'},event.model?h('span',null,event.model):null,event.session_id?h('span',null,`${tr('records.center.session')}: ${shortId(event.session_id,12)}`):null,event.run_id?h('span',null,`Run: ${shortId(event.run_id,12)}`):null,linked?h('span',{className:'ka-record-more'},tr('records.center.details')):null)
+      )
+    })):h('div',{className:'ka-record-empty'},tr('records.center.no_events')),
+    records?.has_more?h('div',{className:'ka-note'},tr('records.center.limited')):null
   )
 
   const requests=h(Panel,{title:tr("ui.926f6b6b6a93"),className:'fill',action:h('button',{className:'ka-btn danger small',disabled:busy,onClick:clear},tr("ui.72c920773767"))},
     turns.length?h('div',{className:'ka-table-wrap'},h('table',{className:'ka-table'},
-      h('thead',null,h('tr',null,...[tr("ui.79cc871ca992"),tr("ui.76b9880829e0"),tr("ui.0a2c91cec6c8"),'Type',tr("ui.800bc641b018"),tr("ui.c63f79e6361e"),'Provider','TTFT',tr("ui.2db420d198ce"),tr("ui.5d087552d200")].map(x=>h('th',{key:x},x)))),
+      h('thead',null,h('tr',null,...[tr("ui.79cc871ca992"),tr("ui.76b9880829e0"),tr("ui.0a2c91cec6c8"),tr('records.center.type'),tr("ui.800bc641b018"),tr("ui.c63f79e6361e"),tr('records.center.provider'),'TTFT',tr("ui.2db420d198ce"),tr("ui.5d087552d200")].map(x=>h('th',{key:x},x)))),
       h('tbody',null,...turns.map((t,i)=>h('tr',{key:i,className:'ka-record-table-row',onClick:()=>openDetail(t)},
-        h('td',null,when(t.started_at||((Number(t.timestamp||0))-(Number(t.total_ms||0)/1000)))),
-        h('td',null,when(t.completed_at||t.timestamp)),
+        h('td',null,recordWhen(t.started_at||((Number(t.timestamp||0))-(Number(t.total_ms||0)/1000)))),
+        h('td',null,recordWhen(t.completed_at||t.timestamp)),
         h('td',{className:statusColor(t.outcome)},outcomeZh(t.outcome)),
-        h('td',null,String(t.selection_source||'').startsWith('background_auto')?'后台':(t.mode_type&&t.mode_type!=='concrete'?String(t.mode_type):tr("ui.74e2b536206b"))),
+        h('td',null,String(t.selection_source||'').startsWith('background_auto')?tr('records.center.background'):(t.mode_type&&t.mode_type!=='concrete'?String(t.mode_type):tr("ui.74e2b536206b"))),
         h('td',{className:'wrap'},t.served_model||'—'),
         h('td',{className:'wrap'},selectionSourceZh(t.selection_source)),
         h('td',null,t.provider_id||'—'),
@@ -1018,19 +1074,19 @@ function RecordsPage({data,trace,modeCatalog,onReload}){
   const routing=h(Panel,{title:tr("ui.07fa5577581b"),description:tr("ui.5a76bfa04295"),className:'fill'},
     routeEvents.length?h('div',{className:'ka-scroll ka-record-routing'},...routeEvents.map((e,i)=>{
       const d=e.data||{}, sig=d.signals||{}, candidates=Array.isArray(d.candidates)?d.candidates:[]
-      const facts=[['Type',d.policy_label||d.policy||'—'],[tr("ui.13f4f9a1f401"),d.resolved_model_name||d.resolved_model||'—'],['Provider',d.provider_id||'—']]
+      const facts=[[tr('records.center.type'),d.policy_label||d.policy||'—'],[tr("ui.13f4f9a1f401"),d.resolved_model_name||d.resolved_model||'—'],[tr('records.center.provider'),d.provider_id||'—']]
       const signalRows=[[tr("ui.8a53ded169c6"),sig.complexity],[tr("ui.cc9c5d304794"),sig.breadth],[tr("ui.969642d75a78"),sig.parallelizability],[tr("ui.96a9697379e2"),sig.risk],[tr("ui.f4dcf66d6ca9"),sig.verification_value]]
       return h('article',{className:'ka-card ka-route-card',key:`${e.timestamp}-${i}`},
-        h('div',{className:'ka-between'},h('b',null,when(e.timestamp)),h('span',{className:'ka-muted'},d.pack?`${d.pack} · ${d.policy||''}`:'')),
+        h('div',{className:'ka-between'},h('b',null,recordWhen(e.timestamp)),h('span',{className:'ka-muted'},d.pack?`${d.pack} · ${d.policy||''}`:'')),
         h('div',{className:'ka-route-grid'},...facts.map(([k,v])=>h('div',{className:'ka-route-fact',key:k},h('div',{className:'k'},k),h('div',{className:'v'},v)))),
         h('div',{className:'ka-route-signals'},...signalRows.map(([k,value])=>{const known=value!=null&&Number.isFinite(Number(value));return h('div',{className:'ka-route-signal',key:k},h('span',null,k),h('b',null,known?`${Math.round(Number(value)*100)}%`:'—'))})),
         candidates.length?h('div',{className:'ka-route-candidates'},...candidates.slice(0,8).map((c,j)=>{const selected=String(c.provider_id||'')===String(d.provider_id||'')&&String(c.model||'')===String(d.resolved_model||'');return h('div',{className:`ka-route-candidate ${selected?'selected':''}`,key:j},h('span',null,c.name||c.model||'—'),h('span',null,c.provider_id||'—'),h('span',null,selected?tr("ui.743aaf951e5d"):tr("ui.0461e4db1948")))})):null,
         h('details',{className:'ka-raw-event'},h('summary',null,tr("ui.7d21073549b4")),h('pre',null,JSON.stringify(d,null,2)))
       )
-    })):h('div',{className:'ka-record-empty'},tr("ui.64637cec9988"))
+    })):h('div',{className:'ka-record-empty'},trace?.status?.mode==='off'?tr('records.trace_disabled'):tr("ui.64637cec9988"))
   )
 
-  const recovery=h(Panel,{title:tr("ui.234339fe2da9"),description:tr("ui.7c66077a4b1a"),className:'fill'},
+  const recovery=h(Panel,{title:tr('records.center.recovery'),description:tr("ui.7c66077a4b1a"),className:'fill'},
     recoveredRuns.length?h('div',{className:'ka-scroll ka-record-list'},...recoveredRuns.map(r=>{const turn=turns.find(t=>String(t.run_id||'')===String(r.run_id||''));return h('article',{className:`ka-card ka-record-card ${turn?'clickable':''}`,key:r.run_id,onClick:turn?()=>openDetail(turn):undefined},
       h('div',{className:'ka-record-card-head'},h('div',{className:'ka-row'},dot(toneForStatus(r.status)==='err'?'err':'warn'),h('b',null,shortId(r.run_id,12)),h('span',{className:statusColor(r.status)},statusZh(r.status))),h('span',{className:statusColor(r.recovery_state)||'ka-muted'},statusZh(r.recovery_state))),
       h('div',{className:'ka-record-meta'},h('span',null,tr("ui.40354a74c249",{v0:(r.retry_count||0)})),h('span',null,tr("ui.b7ffa0686c65",{v0:(r.resume_count||0)})),h('span',null,tr("ui.be6a9c3bbfc0",{v0:(r.replan_count||0)})),h('span',null,r.metadata?.model_id||'—'),turn?h('span',{className:'ka-record-more'},tr("ui.f7520a37748f")):null)
@@ -1046,15 +1102,15 @@ function RecordsPage({data,trace,modeCatalog,onReload}){
   const drawer=selectedTurn?h('div',{className:'ka-record-drawer-backdrop',onMouseDown:e=>{if(e.target===e.currentTarget)closeDetail()}},
     h('aside',{className:'ka-record-drawer'},
       h('div',{className:'ka-record-drawer-head'},
-        h('div',null,h('h2',null,tr("ui.0cd778f3032d")),h('div',{className:'ka-muted'},`${when(selectedTurn.started_at||((Number(selectedTurn.timestamp||0))-(Number(selectedTurn.total_ms||0)/1000)))} → ${when(selectedTurn.completed_at||selectedTurn.timestamp)} · `,h('span',{className:statusColor(selectedTurn.outcome)},outcomeZh(selectedTurn.outcome)))),
+        h('div',null,h('h2',null,tr("ui.0cd778f3032d")),h('div',{className:'ka-muted'},`${recordWhen(selectedTurn.started_at||((Number(selectedTurn.timestamp||0))-(Number(selectedTurn.total_ms||0)/1000)))} → ${recordWhen(selectedTurn.completed_at||selectedTurn.timestamp)} · `,h('span',{className:statusColor(selectedTurn.outcome)},outcomeZh(selectedTurn.outcome)))),
         h('button',{className:'ka-btn small',onClick:closeDetail},tr("ui.6c14bd7f6f9e"))
       ),
       selectedTurn.outcome!=='success'&&failureReason?h('div',{className:'ka-record-failure'},h('strong',null,tr("ui.918468e7557e")),h('div',null,failureReason)):null,
       h('div',{className:'ka-record-drawer-section'},h('h3',null,tr("ui.b122f813d551")),h('div',{className:'ka-record-detail-grid'},
-        h('div',{className:'k'},'Mode'),h('div',{className:'v'},selectedTurn.mode_type&&selectedTurn.mode_type!=='concrete'?`${catalogPackName(modeCatalog,selectedTurn.mode_pack)} · ${catalogPolicyName(modeCatalog,selectedTurn.mode_pack,selectedTurn.mode_type).replace(/ Type$/,'')}`:tr("ui.74e2b536206b")),
-        h('div',{className:'k'},'Provider'),h('div',{className:'v'},selectedTurn.provider_id||'—'),
+        h('div',{className:'k'},tr('records.center.mode')),h('div',{className:'v'},selectedTurn.mode_type&&selectedTurn.mode_type!=='concrete'?`${catalogPackName(modeCatalog,selectedTurn.mode_pack)} · ${catalogPolicyName(modeCatalog,selectedTurn.mode_pack,selectedTurn.mode_type).replace(/ Type$/,'')}`:tr("ui.74e2b536206b")),
+        h('div',{className:'k'},tr('records.center.provider')),h('div',{className:'v'},selectedTurn.provider_id||'—'),
         h('div',{className:'k'},tr("ui.98fd0cbd9c31")),h('div',{className:'v'},selectedTurn.served_model||'—'),
-        h('div',{className:'k'},'Session'),h('div',{className:'v'},selectedTurn.session_id||'—'),
+        h('div',{className:'k'},tr('records.center.session')),h('div',{className:'v'},selectedTurn.session_id||'—'),
         h('div',{className:'k'},tr("ui.5551ce41cca4")),h('div',{className:'v'},selectionSourceZh(selectedTurn.selection_source)),
         h('div',{className:'k'},tr("ui.2c3e246efd56")),h('div',{className:'v'},selectedTurn.selection_requested||tr("ui.4afad877551a")),
         h('div',{className:'k'},tr("ui.5dd4b43063e6")),h('div',{className:'v'},`${selectedTurn.thinking_preference||'—'} → ${selectedTurn.thinking_mode||'—'}`),
@@ -1083,24 +1139,30 @@ function RecordsPage({data,trace,modeCatalog,onReload}){
         h('details',{className:'ka-raw-event'},h('summary',null,tr('routing.candidates_reason')),h('pre',null,JSON.stringify(selectedTurn.route_diagnostics,null,2)))
       ):null,
       selectedRoute&&Object.keys(selectedRoute).length?h('div',{className:'ka-record-drawer-section'},h('h3',null,tr("ui.19da0c94efa2")),h('div',{className:'ka-record-detail-grid'},
-        h('div',{className:'k'},'Selection'),h('div',{className:'v'},selectedRoute.policy_label||selectedRoute.policy||'—'),
+        h('div',{className:'k'},tr('records.center.selection')),h('div',{className:'v'},selectedRoute.policy_label||selectedRoute.policy||'—'),
         h('div',{className:'k'},tr("ui.13f4f9a1f401")),h('div',{className:'v'},selectedRoute.resolved_model_name||selectedRoute.resolved_model||'—'),
-        h('div',{className:'k'},'Provider'),h('div',{className:'v'},selectedRoute.provider_id||'—')
+        h('div',{className:'k'},tr('records.center.provider')),h('div',{className:'v'},selectedRoute.provider_id||'—')
       )):null,
       h('div',{className:'ka-record-drawer-section'},h('h3',null,tr("ui.3f59c969e9f7")),
         !selectedTurn.turn_id&&!selectedTurn.run_id?h('div',{className:'ka-note'},tr("ui.51e14f31ab30")):detailBusy?h('div',{className:'ka-muted'},tr("ui.902c64c0cc7a")):detailError?h('div',{className:'ka-err'},detailError):detailTrace.length?h('div',{className:'ka-record-trace'},...detailTrace.map((e,i)=>h('div',{className:'ka-record-trace-row',key:`${e.timestamp}-${i}`},
           h('span',{className:'seq'},`#${String(i+1).padStart(3,'0')}`),
           h('span',{className:`event ${traceEventColor(e.event)}`},traceEventLabel(e.event)),
-          h('span',{className:'time'},when(e.timestamp)),
+          h('span',{className:'time'},recordWhen(e.timestamp)),
           h('details',null,h('summary',null,tr("ui.7d21073549b4")),h('pre',null,JSON.stringify(e.data||{},null,2)))
         ))):h('div',{className:'ka-muted'},tr("ui.cb8f458c10d5"))
       )
     )
   ):null
   return h('div',{className:'ka-page ka-record-page',style:{position:'relative'}},
-    h(Metrics,{items:[{k:tr("ui.1b1e2bb17ea1"),v:String(s.turns||0)},{k:tr("ui.51991a5d111a"),v:String(s.success||0),tone:'ka-ok'},{k:tr("ui.3e3c8068bb0e"),v:String(s.failed||0),tone:'ka-err'},{k:tr("ui.6aa9ad7241b5"),v:String(turns.filter(t=>t.outcome==='success'&&(Number(t.transport_retries||0)>0||Number(t.fallbacks||0)>0)).length)}]}),
-    usage,
-    h(Tabs,{items:[{id:'all',label:tr("ui.c5d9aeda627b")},{id:'requests',label:tr("ui.926f6b6b6a93")},{id:'routing',label:tr("ui.19da0c94efa2")},{id:'recovery',label:tr("ui.79748ca1c6e5")}],value:tab,onChange:setTab}),
+    h(Metrics,{items:[
+      {k:tr('records.center.turns'),v:recordSummary.turns==null?'—':recordNumber(recordSummary.turns)},
+      {k:tr('records.center.routes'),v:recordSummary.routing==null?'—':recordNumber(recordSummary.routing)},
+      {k:tr('records.center.runtime_events'),v:recordSummary.runtime==null?'—':recordNumber(recordSummary.runtime)},
+      {k:tr('records.center.protected'),v:recordSummary.protected_runs==null?'—':recordNumber(recordSummary.protected_runs)}
+    ]}),
+    h('div',{className:'ka-note ka-record-scope'},tr('records.center.retained_scope'),recordSummary.run_page_saturated?' '+tr('records.center.run_page_limit'):''),
+    tab==='requests'?usage:null,
+    h(Tabs,{items:[{id:'all',label:tr('records.center.overview')},{id:'requests',label:tr('records.center.requests')},{id:'routing',label:tr('records.center.routes')},{id:'recovery',label:tr('records.center.recovery')}],value:tab,onChange:setTab}),
     body,
     drawer
   )
@@ -1244,7 +1306,8 @@ function SettingsPage({settings,status,audit,section,onSectionChange,onReload,on
         h('dt',null,'Runtime'),h('dd',{className:i.runtime_current?'ka-ok':'ka-warn'},i.runtime_version?(i.runtime_current?i.runtime_version:`${i.runtime_version} → ${i.app_version||status?.version||'—'}`):tr("ui.6f7dc945aefa")),
         h('dt',null,'App Data'),h('dd',null,i.app_home_bound?tr("ui.b3addb5e3f54"):tr("ui.3bf179d8d045")),
         h('dt',null,tr("ui.642d85e5f6cc")),h('dd',null,i.baseline||'—'),
-        h('dt',null,'Source audit'),h('dd',null,i.verified_through?`${i.verified_through}${i.verified_commit?` (${i.verified_commit})`:''}`:'—')
+        /* Source audit: distinguish the installed source contract from pinned maintainer audits. */
+        h('dt',null,tr('integration.source_check')),h('dd',null,i.source_contract_status==='passed'?`${i.source_contract_checked_version||i.crew_version} · ${tr('integration.source_local_pass')}${i.version_audited?' · '+tr('integration.source_pinned'):''}`:i.source_contract_status==='failed'?tr('integration.source_failed'):tr('integration.source_not_checked'))
       ),
       i.restart_required?h('div',{className:'ka-note warn',style:{marginTop:'9px'}},tr("ui.5aedd58f98b3")):null,
       i.installed&&!i.restart_required&&!harnessSelected?h('div',{className:'ka-note warn',style:{marginTop:'9px'}},tr("ui.ed64a1180427")):null
@@ -1348,7 +1411,7 @@ function KiroByoAppBody(){
   const theme=useTheme();void theme?.themeVersion
   const hostMode=String(document.documentElement.getAttribute('data-mode')||'').toLowerCase(),themeMode=String(theme?.mode||theme?.resolvedMode||'').toLowerCase(),mediaDark=typeof window!=='undefined'&&window.matchMedia?.('(prefers-color-scheme: dark)').matches,scheme=hostMode==='dark'||themeMode==='dark'||((hostMode!=='light'&&themeMode!=='light')&&mediaDark)?'dark':'light'
   const [uiLocale,setUiLocale]=useState('en')
-  const [tab,setTab]=useState('overview'),[settingsSection,setSettingsSection]=useState('general'),[status,setStatus]=useState(null),[presets,setPresets]=useState([]),[ops,setOps]=useState({turns:[],summary:{},runs:[]}),[trace,setTrace]=useState({events:[],status:{}}),[audit,setAudit]=useState(null),[error,setError]=useState('')
+  const [tab,setTab]=useState('overview'),[settingsSection,setSettingsSection]=useState('general'),[status,setStatus]=useState(null),[presets,setPresets]=useState([]),[ops,setOps]=useState({turns:[],summary:{},runs:[]}),[trace,setTrace]=useState({events:[],status:{}}),[records,setRecords]=useState(null),[audit,setAudit]=useState(null),[error,setError]=useState('')
   const loadStatus=useCallback(async()=>{try{
     const s=await api('/status')
     const target=resolveUiLocale(s.ui_language?.value||'auto')
@@ -1356,14 +1419,14 @@ function KiroByoAppBody(){
     const [en,selected]=await Promise.all([loadLocale('en'),loadLocale(target)])
     EN_MESSAGES=en;ACTIVE_MESSAGES=selected;setUiLocale(target)
     setStatus(s);setError('');return s
-  }catch(e){setError(e.message);throw e}},[]),loadPresets=useCallback(async()=>{try{const p=await api('/presets');setPresets(p.presets||[])}catch(e){setError(e.message)}},[]),loadOps=useCallback(async()=>{try{const d=await api('/diagnostics?limit=50');setOps(d);return d}catch(e){setError(e.message)}},[]),loadTrace=useCallback(async()=>{try{const t=await api('/runtime-trace?limit=100');setTrace(t);return t}catch(e){setError(e.message)}},[]),loadAudit=useCallback(async()=>{try{const r=await api('/integration');setAudit(r);return r}catch(e){setError(e.message);throw e}},[])
-  useEffect(()=>{Promise.allSettled([loadStatus(),loadPresets(),loadOps()]);const id=setInterval(()=>{loadStatus().catch(()=>{});if(['overview','records'].includes(tab))loadOps().catch(()=>{})},15000);return()=>clearInterval(id)},[loadStatus,loadPresets,loadOps,tab])
-  useEffect(()=>{if(tab==='records')Promise.allSettled([loadOps(),loadTrace()])},[tab,loadOps,loadTrace])
+  }catch(e){setError(e.message);throw e}},[]),loadPresets=useCallback(async()=>{try{const p=await api('/presets');setPresets(p.presets||[])}catch(e){setError(e.message)}},[]),loadOps=useCallback(async()=>{try{const d=await api('/diagnostics?limit=50');setOps(d);return d}catch(e){setError(e.message)}},[]),loadTrace=useCallback(async()=>{try{const t=await api('/runtime-trace?limit=100&event=model.route.selected');setTrace(t);return t}catch(e){setError(e.message)}},[]),loadRecords=useCallback(async()=>{try{const r=await api('/records?limit=100');setRecords(r);return r}catch(e){setError(e.message)}},[]),loadAudit=useCallback(async()=>{try{const r=await api('/integration');setAudit(r);return r}catch(e){setError(e.message);throw e}},[])
+  useEffect(()=>{Promise.allSettled([loadStatus(),loadPresets(),loadOps()]);const id=setInterval(()=>{loadStatus().catch(()=>{});if(['overview','records'].includes(tab))loadOps().catch(()=>{});if(tab==='records')loadRecords().catch(()=>{})},15000);return()=>clearInterval(id)},[loadStatus,loadPresets,loadOps,loadRecords,tab])
+  useEffect(()=>{if(tab==='records')Promise.allSettled([loadOps(),loadTrace(),loadRecords()])},[tab,loadOps,loadTrace,loadRecords])
   if(!status)return h('div',{className:'ka-root','data-ka-scheme':scheme},h('div',{className:'ka-empty'},error||(EN_MESSAGES['ui.08d397563f54']||'Loading Kiro BYO…')))
 
   const o=status.overview||{},health=o.health||{},installed=!!(o.integration?.installed??status.integration?.installed),providers=status.providers||[],mode=status.mode||{}
   const nav=[['overview',tr("ui.e506baa7d7a6")],['providers',tr("ui.703c9eb0f092")],['models',tr("ui.98fd0cbd9c31")],['modes',tr("ui.ed0eea8f20ba")],['accounts',tr("ui.c3d92b20c8a3")],['tasks',tr("ui.3172b317f9fc")],['records',tr("ui.9058a1c2c59e")],['settings',tr("ui.7debf9cb0372")]]
-  const titles={overview:[tr("ui.e506baa7d7a6"),tr("ui.c7bd26ca84bf")],providers:[tr("ui.703c9eb0f092"),tr("ui.a120e8a58bfd")],models:[tr("ui.98fd0cbd9c31"),tr("ui.de4dbb22e17e")],modes:[tr("ui.ed0eea8f20ba"),tr("ui.40b5c915a0a0",{v0:(modePackName(mode))})],accounts:[tr("ui.c3d92b20c8a3"),tr("ui.3fc6a60652b2")],tasks:[tr("ui.3172b317f9fc"),tr("ui.910413710270")],records:[tr("ui.9058a1c2c59e"),tr("ui.9ddf585352f4")],settings:[tr("ui.7debf9cb0372"),tr("ui.8bfa1775b1bf")]}
+  const titles={overview:[tr("ui.e506baa7d7a6"),tr("ui.c7bd26ca84bf")],providers:[tr("ui.703c9eb0f092"),tr("ui.a120e8a58bfd")],models:[tr("ui.98fd0cbd9c31"),tr("ui.de4dbb22e17e")],modes:[tr("ui.ed0eea8f20ba"),tr("ui.40b5c915a0a0",{v0:(modePackName(mode))})],accounts:[tr("ui.c3d92b20c8a3"),tr("ui.3fc6a60652b2")],tasks:[tr("ui.3172b317f9fc"),tr("ui.910413710270")],records:[tr('records.center.title'),tr('records.center.subtitle')],settings:[tr("ui.7debf9cb0372"),tr("ui.8bfa1775b1bf")]}
   const navigate=id=>{
     if(id==='integration'){setSettingsSection('crew');setTab('settings');return}
     if(id==='settings')setSettingsSection('general')
@@ -1377,7 +1440,7 @@ function KiroByoAppBody(){
   else if(tab==='modes')body=h(ModesPage,{router:status.mode||{},onReload:loadStatus})
   else if(tab==='accounts')body=h(AccountsPage)
   else if(tab==='tasks')body=h(TasksPage,{onNavigate:navigate})
-  else if(tab==='records')body=h(RecordsPage,{data:ops,trace,modeCatalog:mode.catalog||{},onReload:async()=>{await Promise.allSettled([loadOps(),loadStatus(),loadTrace()])}})
+  else if(tab==='records')body=h(RecordsPage,{data:ops,trace,records,modeCatalog:mode.catalog||{},locale:uiLocale,onReload:async()=>{await Promise.allSettled([loadOps(),loadStatus(),loadTrace(),loadRecords()])}})
   else if(tab==='settings')body=h(SettingsPage,{settings:status.reasoning_language||{},status,audit:audit||status.integration,section:settingsSection,onSectionChange:setSettingsSection,onReload:async()=>{await loadStatus()},onAuditReload:loadAudit})
   else{setTab('overview');return null}
 
@@ -1388,7 +1451,7 @@ function KiroByoAppBody(){
   return h('div',{className:'ka-root','data-ka-scheme':scheme,lang:uiLocale,style:{colorScheme:scheme}},
     h('div',{className:'ka-app'},
       h('aside',{className:'ka-side'},
-        h('button',{className:'ka-brand',onClick:()=>navigate('overview'),title:tr("ui.2ade598e30d7")},h('div',{className:'ka-logo'},'K'),h('div',{className:'ka-brand-copy'},h('b',null,'Kiro BYO'),h('small',null,`ACP Harness · v${o.version||status.version}`))),
+        h('button',{className:'ka-brand',onClick:()=>navigate('overview'),title:tr("ui.2ade598e30d7")},h('div',{className:'ka-logo'},h('img',{src:UI_ICON_URL,alt:'SSSP-BYO'})),h('div',{className:'ka-brand-copy'},h('b',null,'Kiro BYO'),h('small',null,`ACP Harness · v${o.version||status.version}`))),
         h('div',{className:'ka-side-status'},
           h('div',{className:'ka-health-line'},h('div',{className:'ka-row'},dot(tone),h('strong',null,localizedHealth(health,installed))),h('span',{className:'ka-muted'},o.crew_version||status.integration?.crew_version||'Crew ?')),
           h('div',{className:'ka-quick'},h('span',null,h('b',null,providerCount),tr("ui.a05944829854")),h('span',null,h('b',null,modelCount),tr("ui.ed16beb8a362")),h('span',null,h('b',null,turns),tr("ui.ff45c410c613")),h('span',null,h('b',{className:'ka-err'},failed),tr("ui.1080a6069586")))

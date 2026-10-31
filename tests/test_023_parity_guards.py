@@ -152,36 +152,20 @@ def test_crew10_previous_reconcile_helper_is_upgradeable():
     assert crew10_patch.patch_text(SLOT_EFFORT, old) == current
 
 
-def test_dyna_three_forms_are_visible_but_not_executable(tmp_path):
+def test_dyna_three_forms_are_available_and_reserved_against_override(tmp_path):
     with use_app_home(tmp_path):
         dyna = get_policy_pack('dyna')
-        assert dyna is not None and not dyna.enabled
-        assert [p.id for p in dyna.policies] == ['flash', 'strong', 'miracle']
-        packs = public_policy_packs()['packs']
-        preview = next(pack for pack in packs if pack['id'] == 'dyna')
-        assert preview['status'] == 'coming_soon'
-        assert preview['enabled'] is False
-        assert len(preview['policies']) == 3
-        assert get_policy_pack('tiga').enabled
-        for policy in ('flash', 'strong', 'miracle'):
-            with pytest.raises(PolicyPackError, match='not available yet'):
-                resolve_policy('dyna', policy)
-            with pytest.raises(PolicyPackError, match='not available yet'):
-                normalize_policy(policy, 'dyna')
-            with pytest.raises(ConfigError, match='not available yet'):
-                set_mode_selection(policy, 'dyna')
-        with pytest.raises(ConfigError, match='not available yet'):
-            set_mode_pack('dyna')
-        assert not (tmp_path / 'config' / 'providers.json').exists()
-
-        # The full loader must also reject a manually edited settings file.
-        cfg = tmp_path / 'config' / 'providers.json'
-        cfg.parent.mkdir(parents=True, exist_ok=True)
-        cfg.write_text(json.dumps({'providers': [], 'mode': {'id': 'dyna', 'type': 'flash'}}))
-        with pytest.raises(ConfigError, match='not available yet'):
-            load_catalog_config(cfg)
-
-        # Spoofing the reserved ID with a custom enabled JSON cannot unlock it.
+        assert dyna is not None and dyna.enabled
+        assert [p.id for p in dyna.policies] == ['miracle', 'flash', 'strong']
+        assert dyna.default_policy == 'flash'
+        entry = next(row for row in public_policy_packs()['packs'] if row['id'] == 'dyna')
+        assert entry['status'] == 'available'
+        assert set_mode_pack('dyna')['policy'] == 'flash'
+        for policy in ('miracle', 'flash', 'strong'):
+            assert resolve_policy('dyna', policy)[1].id == policy
+            assert normalize_policy(policy, 'dyna') == policy
+            assert set_mode_selection(policy, 'dyna')['policy'] == policy
+        # Active built-in data cannot be overwritten by user JSON.
         custom = tmp_path / 'policy_packs'
         custom.mkdir()
         (custom / 'dyna.json').write_text(json.dumps({
@@ -190,7 +174,8 @@ def test_dyna_three_forms_are_visible_but_not_executable(tmp_path):
                 {'id': 'flash', 'semantics': {}, 'execution': {'routing': {'quality': 1, 'speed': 0, 'economy': 0}}}
             ],
         }))
-        assert get_policy_pack('dyna').enabled is False
+        assert get_policy_pack('dyna').enabled is True
+        assert [p.id for p in get_policy_pack('dyna').policies] == ['miracle','flash','strong']
         assert any('reserved' in issue['error'] for issue in public_policy_packs()['errors'])
 
 
@@ -253,14 +238,14 @@ def test_broken_local_catalog_can_use_real_advertised_model(monkeypatch, tmp_pat
     assert [row['model_name'] for row in rows] == ['demo/model']
 
 
-def test_dyna_stays_disabled_and_tiga_mode_fits_one_page():
+def test_mode_page_keeps_one_active_mode_view():
     ui = (Path(__file__).resolve().parents[1] / 'ui' / 'index.mjs').read_text()
     # One mode at a time: no second Dyna section beneath active Tiga content.
     assert "className:'ka-page ka-mode-page'" in ui
     assert '...unavailablePacks.map(preview' not in ui
     assert '.ka-mode-page{overflow:hidden}' in ui
     assert '.ka-mode-page .ka-mode-body{flex:1 1 auto;min-height:0;height:auto}' in ui
-    # Pre-release Dyna is still visible only as a disabled menu item.
+    # Disabled custom modes remain visible but cannot be selected.
     assert 'disabled:p.enabled===false' in ui
     assert "a.id==='tiga'?-1:b.id==='tiga'?1:0" in ui
     assert 'options:orderedPacks.map' in ui

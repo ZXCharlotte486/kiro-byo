@@ -2,10 +2,10 @@
 
 ## 关于本仓库
 
-这是 **Kiro BYO 的源码仓库**，当前版本 **0.2.5**。Kiro BYO 是 KiroCrew 的第三方模型后端（App），**非 KiroCrew 官方项目**，也不随 KiroCrew 官方分发。
+这是 **Kiro BYO 的源码仓库**，当前版本 **0.3.0**。Kiro BYO 是 KiroCrew 的第三方模型后端（App），**非 KiroCrew 官方项目**，也不随 KiroCrew 官方分发。
 
 - **想安装使用**：请获取打包好的 release 压缩包（含安装包 `.whl` 与校验码），不要直接拿本仓库源码安装。本仓库只放源码。
-- **兼容性**：0.2.5 对应 KiroCrew **0.11.0-rc.1**。版本不符时集成器会拒绝写入，以保护现有数据。
+- **兼容性**：0.3.0 对应 KiroCrew **0.11.0-rc.1**。版本不符时集成器会拒绝写入，以保护现有数据。
 - **新手教程**：[中文教程.md](中文教程.md)（从安装到聊天，全流程）。
 
 - **中文文档**：[WINDOWS_QUICKSTART.md](WINDOWS_QUICKSTART.md)（安装与升级）、[安装说明.txt](安装说明.txt)（本次热修复步骤）、[修复技术报告.md](修复技术报告.md)（修复原理）、[CHANGELOG.md](CHANGELOG.md)（版本历史）。
@@ -40,7 +40,7 @@ session orchestration, backend-card capabilities, Crewmate governance, Side Chat
 hooks and permission UI. Kiro BYO owns provider transport, the agent/tool loop,
 native host tools, MCP bridging, session persistence and provider telemetry.
 
-Current release: **0.2.5**. New: bounded, session-local `update_plan` with 20 steps and read-only Crew MCP refusal diagnostics. The Plan tool is not a Crew schedule/task database and is not durable. See `RELEASE_NOTES_0.2.5.md`.
+Current release: **0.3.0**. Prior: bounded, session-local `update_plan` with 20 steps and read-only Crew MCP refusal diagnostics. The Plan tool is not a Crew schedule/task database and is not durable. See `RELEASE_NOTES_0.3.0.md`.
 
 Current compatibility: This is a **Crew 0.11.0-rc.1 compatibility candidate**, not a source-verified stable integration. The adapter is pinned to that exact prerelease and refuses unknown source seams without writing. Crew 0.10 support is retired. When the main backend is BYO, new member sessions are routed to BYO and conflicting explicit official member overrides are refused; saved Crew member preferences remain untouched when switching back. This is a source-level route guard, not Windows Mate 2.0 end-to-end certification (notably per-Mate Conductor/Worker paths and already-open sessions). Existing Tiga / Dyna policies and BYO runtime semantics are retained. Static source-contract checks do not constitute a real Windows end-to-end acceptance test.
 

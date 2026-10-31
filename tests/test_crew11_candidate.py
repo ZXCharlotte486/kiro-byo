@@ -23,17 +23,21 @@ def test_rc1_profile_exact_source_pinned_not_e2e_verified() -> None:
     meta = json.loads((ADAPTER / "compatibility.json").read_text())
     assert meta["transformer"] == "adaptive11"
     assert meta["allowed_crew_versions"] == ["0.11.0-rc.1", "0.11.0rc1"]
+    assert meta["semantic_candidate_regex"] == r"^0\.11\.(?:0(?:-rc\.|rc)(?:[2-9]|[1-9][0-9]+)|1(?:-rc\.|rc)(?:[1-9]|[1-9][0-9]+))$"
+    assert not _version_audited(meta, "0.11.0-rc.2")
     assert _version_audited(meta, "0.11.0-rc.1")
-    assert len(meta["pinned_source_sha256"]) == len(meta["generated_files"]) == 21
+    assert len(meta["pinned_source_sha256"]) == 21
+    assert len(meta["generated_files"]) == 23
+    assert set(meta["semantic_clock_seams_unpinned"]) == set(meta["generated_files"]) - set(meta["pinned_source_sha256"])
     assert "src/kiro_crew/config/loader_builders.py" in meta["generated_files"]
     assert "mate_worker_projection" in meta["required_contract_symbols"]["src/kiro_crew/acp/harness/kas.py"]
     assert _transformer_for(meta)[0]  # an explicit transformer is required
     app = json.loads((ROOT / "app.json").read_text())
-    assert app["version"] == "0.2.5"
+    assert app["version"] == "0.3.0"
     assert app["minKiroCrewVersion"] == "0.11.0-rc.1"
 
 
-@pytest.mark.parametrize("version", ["0.10.0", "0.10.0-insider.9", "0.11.0", "0.11.0-rc.2", "0.12.0", "unknown"])
+@pytest.mark.parametrize("version", ["0.10.0", "0.10.0-insider.9", "0.11.0-rc.0", "0.11.0-rc.03", "0.11.0-preview.3", "0.11.2", "0.12.0", "unknown"])
 def test_unpinned_version_cannot_patch(tmp_path: Path, version: str) -> None:
     crew = tmp_path / "kiro_crew"
     crew.mkdir()
