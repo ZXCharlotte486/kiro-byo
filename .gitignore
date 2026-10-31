@@ -18,6 +18,9 @@ venv/
 config/*.json
 !config/*.example.json
 
+# 架构预算是纯数字、不含密钥；测试与守卫脚本都依赖它，必须入库
+!config/architecture_budget.json
+
 # 编辑器与系统杂项
 .vscode/
 .idea/
